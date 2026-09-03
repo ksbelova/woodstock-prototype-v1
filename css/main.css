@@ -1280,6 +1280,32 @@ input[type="file"]::file-selector-button:hover {
   color: var(--muted);
 }
 
+.spec-list--full .spec-list__nested--2 {
+  padding-left: 36px;
+}
+
+.spec-positions {
+  display: grid;
+}
+
+.spec-position-block {
+  padding: 16px 0 4px;
+  border-top: 1px solid var(--line);
+}
+
+.spec-position-block:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.spec-position-block__title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .spec-group--total .total-box {
   margin-top: 0;
 }
@@ -1468,4 +1494,392 @@ input[type="file"]::file-selector-button:hover {
 @media (max-width: 720px) {
   .dynamic-adjustment-row { align-items: stretch; flex-direction: column; }
   .dynamic-adjustment-row__right { justify-items: start; }
+}
+/* Detailed plate calculation: dimension block reused from the first prototype. */
+.size-block-note {
+  margin: -4px 0 18px;
+  max-width: 760px;
+}
+
+.size-rows {
+  display: grid;
+  gap: 16px;
+}
+
+.size-row {
+  padding: 18px;
+  background: #fbfbfb;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+
+.size-row.is-active {
+  border-color: var(--line-dark);
+  background: var(--white);
+}
+
+.size-row__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.size-row__header strong {
+  font-size: 16px;
+  line-height: 1.25;
+  font-weight: 500;
+}
+
+.size-row__remove {
+  min-height: 34px;
+  padding: 7px 11px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--muted);
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.size-row__remove:hover { color: var(--text); border-color: var(--black); }
+.size-row__remove:disabled { opacity: 0.35; cursor: default; background: var(--soft); border-color: var(--line); }
+
+.standard-size-list {
+  margin: 0 0 28px;
+  padding: 18px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+
+.standard-size-list--row {
+  margin: 16px 0 14px;
+  padding: 14px;
+  border-radius: 14px;
+}
+
+.standard-size-list .field__label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.25;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.standard-size-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.standard-size-values > span,
+.standard-size-choice {
+  min-width: 0;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.25;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.standard-size-choice {
+  cursor: pointer;
+  transition: border-color 0.16s ease, background-color 0.16s ease, transform 0.16s ease;
+}
+
+.standard-size-choice:hover {
+  border-color: var(--black);
+  background: #fbfbfb;
+  transform: translateY(-1px);
+}
+
+.standard-size-choice:focus-visible {
+  outline: 2px solid var(--black);
+  outline-offset: 2px;
+  border-color: var(--black);
+}
+
+.standard-size-choice.is-selected {
+  border-color: var(--black);
+  background: var(--white);
+  box-shadow: inset 0 0 0 1px var(--black);
+}
+
+.size-row__custom-toggle {
+  margin-top: 12px;
+}
+
+.field-grid--size-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(130px, 170px);
+  gap: 12px;
+  align-items: start;
+}
+
+.field-grid--size-row .field { margin-bottom: 0; }
+.field-grid--size-row input[readonly] { background: var(--soft); }
+
+.size-row__result {
+  max-width: 440px;
+  margin-top: 14px;
+}
+
+.size-row__extra {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+}
+
+.toggle-line {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 9px;
+  font-size: 14px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.toggle-line input {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+}
+
+.size-row__details {
+  display: grid;
+  gap: 14px;
+  padding-top: 2px;
+}
+
+.add-size-row-button {
+  width: fit-content;
+  min-height: 44px;
+  margin-top: 16px;
+  padding: 10px 16px;
+  font-size: 14px;
+  line-height: 1.2;
+  border-radius: 12px;
+}
+
+@media (max-width: 900px) {
+  .standard-size-values { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .field-grid--size-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .standard-size-values { grid-template-columns: 1fr; }
+  .field-grid--size-row { grid-template-columns: 1fr; }
+  .size-row__header { align-items: flex-start; }
+}
+
+#priceWarnings strong { display: block; margin-bottom: 8px; }
+#priceWarnings ul { margin: 0; padding-left: 20px; }
+#priceWarnings li + li { margin-top: 6px; }
+
+.spec-inline-note {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+@media (max-width: 900px) {
+  .standard-size-values { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .field-grid--size-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .size-row__actions { padding-top: 0; }
+}
+
+@media (max-width: 560px) {
+  .standard-size-values { grid-template-columns: 1fr; }
+  .field-grid--size-row { grid-template-columns: 1fr; }
+  .size-row__actions { padding-top: 0; }
+}
+
+/* Detailed plate calculation: additional UI primitives reused from the first prototype. */
+.standard-size-values span:not(:last-child)::after {
+  display: none;
+}
+
+.standard-size-values [data-standard-size]:active {
+  transform: translateY(0);
+}
+
+.conditional-block {
+  display: grid;
+  gap: 20px;
+}
+
+.field-status {
+  margin-top: 12px;
+  padding: 13px 14px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.field-status--ok {
+  color: var(--text);
+  background: #fbfbfb;
+  border-color: var(--line-dark);
+}
+
+.field-status--warning {
+  color: var(--text);
+  background: #f1f1ee;
+  border-color: var(--line-dark);
+}
+
+.secondary-button {
+  min-height: 34px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.secondary-button:hover {
+  border-color: var(--black);
+}
+
+.secondary-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+
+/* Panels: standard sizes are shown as full-width orientation pairs. */
+.standard-size-values {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.standard-size-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.standard-size-pair .standard-size-choice {
+  width: 100%;
+}
+
+.standard-size-pair--single .standard-size-choice {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 560px) {
+  .standard-size-values {
+    grid-template-columns: 1fr;
+  }
+
+  .standard-size-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+}
+
+/* Detailed panels: transparent technological operations and finish overrides. */
+.tech-operations-list {
+  margin-bottom: 0;
+}
+
+.finish-position-toggle {
+  margin-top: 16px;
+}
+
+.finish-position-overrides {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.finish-position-card {
+  padding: 16px;
+  background: #fbfbfb;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.finish-position-card__head {
+  margin-bottom: 14px;
+}
+
+.finish-position-card__head strong {
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 500;
+}
+
+.finish-position-card .field:last-child {
+  margin-bottom: 0;
+}
+
+.finish-position-details {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+
+/* Компактная ручная стоимость основы: продолжение строки выбора основы. */
+.manual-base-price-inline {
+  margin-top: -8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+
+.manual-base-price-inline__note {
+  margin: 0 0 2px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.manual-base-price-inline__field {
+  margin-bottom: 0;
+}
+
+.manual-base-price-error {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--black);
+}
+
+#manualBasePriceInput[aria-invalid="true"] {
+  border-color: var(--black);
+}
+
+@media (max-width: 760px) {
+  .manual-base-price-inline {
+    grid-template-columns: 1fr;
+    margin-top: -4px;
+  }
 }
