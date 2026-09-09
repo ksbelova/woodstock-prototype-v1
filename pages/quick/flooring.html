@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Краткий расчёт ориентировочной стоимости инженерной доски Woodstock." />
-  <title>Инженерная доска — краткий расчёт Woodstock</title>
+  <meta name="description" content="Краткий расчёт ориентировочной стоимости инженерной доски WOODSTOCK." />
+  <title>Инженерная доска — краткий расчёт WOODSTOCK</title>
   <link rel="stylesheet" href="../../css/main.css" />
 </head>
 <body>
@@ -23,9 +23,14 @@
         <section class="form-block">
           <h2>Материал</h2>
 
-          <input id="materialTypeSelect" type="hidden" value="" />
-
           <div class="field-grid field-grid--two">
+            <label class="field" id="materialTypeField">
+              <span class="field__label">Тип шпона</span>
+              <select id="materialTypeSelect">
+                <option value="">Выберите тип шпона</option>
+              </select>
+            </label>
+
             <div class="field autocomplete-field" id="speciesField">
               <label class="field__label" for="speciesInput">Наименование шпона</label>
               <div class="autocomplete-control">
@@ -33,7 +38,7 @@
                   id="speciesInput"
                   type="text"
                   autocomplete="off"
-                  placeholder="Введите название шпона"
+                  placeholder="Выберите шпон"
                   aria-controls="speciesSuggestions"
                   aria-expanded="false"
                 />
@@ -43,11 +48,13 @@
               <span class="field__note" id="speciesHint"></span>
               <span class="field__error" id="speciesError"></span>
             </div>
+          </div>
 
+          <div class="field-grid field-grid--two">
             <label class="field" id="topLayerField">
-              <span class="field__label">Толщина лицевого шпона</span>
+              <span class="field__label">Верхний слой</span>
               <select id="topLayerSelect">
-                <option value="">Выберите толщину лицевого шпона</option>
+                <option value="">Выберите верхний слой</option>
               </select>
               <span class="field__note" id="topLayerHint"></span>
               <span class="field__error" id="topLayerError"></span>
@@ -68,12 +75,12 @@
             </label>
 
             <div class="field is-hidden" id="customPatternField">
-              <label class="field__label" for="customPatternInput">Описание раскладки по ТЗ</label>
+              <label class="field__label" for="customPatternInput">Описание индивидуальной раскладки</label>
               <textarea id="customPatternInput" rows="4" placeholder="Опишите рисунок, направление, размеры элементов и другие требования"></textarea>
               <span class="field__error" id="customPatternError"></span>
 
               <div class="file-upload-box">
-                <label class="field__label" for="customPatternFileInput">Файл раскладки по ТЗ</label>
+                <label class="field__label" for="customPatternFileInput">Файл индивидуальной раскладки</label>
                 <input
                   id="customPatternFileInput"
                   type="file"
@@ -86,7 +93,7 @@
             </div>
 
             <p class="field-warning is-hidden" id="customPatternWarning">
-              Для ориентировочного расчёта используется запас 15%. Точное количество доски уточняется после проверки ТЗ менеджером.
+              Для ориентировочного расчёта используется запас 15%. Точное количество доски уточняется после проверки индивидуальной раскладки менеджером.
             </p>
 
             <button
@@ -101,13 +108,13 @@
 
             <div class="field-grid field-grid--two is-hidden" id="boardSizeFields">
               <label class="field" id="boardWidthField">
-                <span class="field__label">Ширина доски, мм</span>
+                <span class="field__label">Ширина, мм</span>
                 <input id="boardWidthInput" type="number" step="1" inputmode="numeric" />
                 <span class="field__error" id="boardWidthError"></span>
               </label>
 
               <label class="field" id="boardLengthField">
-                <span class="field__label">Длина ламелей, мм</span>
+                <span class="field__label">Длина, мм</span>
                 <input id="boardLengthInput" type="number" step="1" inputmode="numeric" />
                 <span class="field__error" id="boardLengthError"></span>
               </label>
@@ -138,6 +145,7 @@
               <span class="area-summary__formula" id="areaWithWasteFormula">Сначала выберите раскладку.</span>
             </div>
 
+            <p class="field__note is-hidden" id="volumeDiscountHint">Для больших объёмов заказа предусмотрена скидка. Размер скидки можно уточнить у менеджера.</p>
             <p class="field__note is-hidden" id="quickWasteHint"></p>
           </div>
         </section>
@@ -164,6 +172,24 @@
               <span class="field__error" id="nameError"></span>
             </label>
 
+            <div class="field autocomplete-field" id="cityField">
+              <label class="field__label" for="cityInput">Город *</label>
+              <div class="autocomplete-control">
+                <input
+                  id="cityInput"
+                  type="text"
+                  autocomplete="address-level2"
+                  placeholder="Выберите или введите город"
+                  aria-controls="citySuggestions"
+                  aria-expanded="false"
+                />
+                <div class="autocomplete-menu is-hidden" id="citySuggestions" role="listbox"></div>
+              </div>
+              <span class="field__error" id="cityError"></span>
+            </div>
+          </div>
+
+          <div class="field-grid field-grid--two">
             <label class="field" id="phoneField">
               <span class="field__label">Номер телефона *</span>
               <input
@@ -171,18 +197,10 @@
                 type="tel"
                 autocomplete="tel"
                 inputmode="tel"
-                maxlength="16"
+                maxlength="25"
                 placeholder="+7, +375 или другой код страны"
               />
               <span class="field__error" id="phoneError"></span>
-            </label>
-          </div>
-
-          <div class="field-grid field-grid--two">
-            <label class="field" id="cityField">
-              <span class="field__label">Город *</span>
-              <input id="cityInput" type="text" autocomplete="address-level2" placeholder="Укажите город" />
-              <span class="field__error" id="cityError"></span>
             </label>
 
             <label class="field" id="emailField">
@@ -203,7 +221,7 @@
 
           <label class="field">
             <span class="field__label">Комментарий</span>
-            <textarea id="commentInput" rows="4" placeholder="Дополнительные требования к изделию"></textarea>
+            <textarea id="commentInput" rows="4" placeholder="Дополнительные требования к инженерной доске"></textarea>
           </label>
 
           <label class="field file-upload-box">
@@ -267,7 +285,7 @@
       <h2 class="download-modal__title" id="downloadModalTitle">Спасибо! Спецификация скачана</h2>
 
       <p class="download-modal__text">
-        Мы получили ваш расчёт. Менеджер Woodstock проверит параметры.
+        Мы получили ваш расчёт. Менеджер WOODSTOCK проверит параметры.
         Если потребуется уточнение, мы свяжемся с вами.
       </p>
 

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Инженерная доска — подробный расчёт Woodstock</title>
+  <title>Инженерная доска — подробный расчёт WOODSTOCK</title>
   <link rel="stylesheet" href="../../css/main.css" />
 </head>
 <body>
@@ -36,7 +36,7 @@
                   id="speciesInput"
                   type="text"
                   autocomplete="off"
-                  placeholder="Введите название шпона"
+                  placeholder="Выберите шпон"
                   aria-describedby="speciesSearchHint"
                   aria-controls="speciesSuggestions"
                   aria-expanded="false"
@@ -51,35 +51,44 @@
 
           <div class="field-grid field-grid--two">
             <label class="field" id="topLayerField">
-              <span class="field__label">Толщина лицевого шпона</span>
+              <span class="field__label">Верхний слой</span>
               <select id="topLayerSelect">
-                <option value="">Выберите толщину лицевого шпона</option>
+                <option value="">Выберите верхний слой</option>
               </select>
               <span class="field__note" id="topLayerHint"></span>
               <span class="field__error" id="topLayerError"></span>
             </label>
 
-            <div class="field" id="baseThicknessField">
-              <span class="field__label">Основа</span>
-              <div class="static-value" id="baseSummary">Влагостойкая фанера из берёзы · 12 мм</div>
-              <button class="field-action" id="baseThicknessToggle" type="button" aria-expanded="false" aria-controls="customBaseThicknessField">Указать другую толщину основы</button>
-              <span class="field__error" id="baseThicknessError"></span>
-            </div>
-
-            <input id="sortingSelect" type="hidden" value="Select+" />
+            <label class="field" id="patternTypeField">
+              <span class="field__label">Тип рисунка</span>
+              <select id="patternTypeSelect" disabled>
+                <option value="">Выберите тип рисунка</option>
+              </select>
+              <span class="field__error" id="patternTypeError"></span>
+            </label>
           </div>
 
+          <div class="field-grid field-grid--two">
+            <div class="field" id="baseThicknessField">
+              <span class="field__label">Нижний слой</span>
+              <div class="static-value" id="baseSummary">Влагостойкая фанера из берёзы · 12 мм</div>
+              <button class="field-action" id="baseThicknessToggle" type="button" aria-expanded="false" aria-controls="customBaseThicknessField">Указать другую толщину нижнего слоя</button>
+              <span class="field__error" id="baseThicknessError"></span>
+            </div>
+          </div>
+
+          <input id="sortingSelect" type="hidden" value="Select+" />
+
           <div class="field is-hidden" id="customBaseThicknessField">
-            <label class="field__label" for="baseThicknessInput">Толщина основы, мм</label>
-            <input id="baseThicknessInput" type="number" min="0.1" step="0.1" inputmode="decimal" placeholder="Например, 15" />
-            <span class="field__note">Стандартная основа — 12 мм. Для другой толщины по умолчанию применяется наценка +10%.</span>
+            <label class="field__label" for="baseThicknessInput">Толщина нижнего слоя, мм</label>
+            <input id="baseThicknessInput" type="number" min="8" max="21" step="0.1" inputmode="decimal" placeholder="8–21" />
+            <span class="field__note">Для другой толщины нижнего слоя стоимость увеличивается на 10%.</span>
             <span class="field__error" id="baseThicknessInputError"></span>
           </div>
         </section>
 
         <section class="form-block is-hidden" id="selectionSurchargeBlock">
           <h2>Дополнительный отбор</h2>
-          <p class="field__note">Показывается только для позиций, где надбавка предусмотрена актуальным прайс-листом.</p>
           <div class="selection-options" id="selectionSurchargeOptions"></div>
         </section>
 
@@ -105,12 +114,12 @@
             </label>
 
             <div class="field is-hidden" id="customPatternField">
-              <label class="field__label" for="customPatternInput">Описание раскладки по ТЗ</label>
+              <label class="field__label" for="customPatternInput">Описание индивидуальной раскладки</label>
               <textarea id="customPatternInput" rows="4" placeholder="Опишите рисунок, направление, размеры элементов и другие требования"></textarea>
               <span class="field__error" id="customPatternError"></span>
 
               <div class="file-upload-box">
-                <label class="field__label" for="customPatternFileInput">Файл раскладки по ТЗ</label>
+                <label class="field__label" for="customPatternFileInput">Файл индивидуальной раскладки</label>
                 <input
                   id="customPatternFileInput"
                   type="file"
@@ -122,14 +131,14 @@
               </div>
             </div>
 
-            <p class="field-warning is-hidden" id="customPatternWarning">Для раскладки по ТЗ размеры и процент отходов должны быть подтверждены производством.</p>
+            <p class="field-warning is-hidden" id="customPatternWarning">Для индивидуальной раскладки размеры и процент отходов должны быть подтверждены производством.</p>
           </div>
 
           <div class="form-subsection">
 
             <div class="field-grid field-grid--two">
               <label class="field" id="widthField">
-                <span class="field__label">Ширина доски, мм</span>
+                <span class="field__label">Ширина, мм</span>
                 <input
                   id="widthInput"
                   type="number"
@@ -142,7 +151,7 @@
               </label>
 
               <label class="field" id="lengthField">
-                <span class="field__label" id="lengthLabel">Длина ламелей, мм</span>
+                <span class="field__label" id="lengthLabel">Длина, мм</span>
                 <input
                   id="lengthInput"
                   type="number"
@@ -204,7 +213,7 @@
           </label>
           <label class="field is-hidden" id="glossField">
             <span class="field__label" id="glossLabel">Степень блеска, %</span>
-            <input id="glossInput" type="number" min="5" max="60" step="1" inputmode="numeric" />
+            <select id="glossInput"></select>
             <span class="field__note" id="glossHint"></span>
             <span class="field__error" id="glossError"></span>
           </label>
@@ -286,35 +295,43 @@
 
           <div class="spec-groups">
             <section class="spec-group">
-              <h3 class="spec-group__title">Характеристики позиции</h3>
+              <h3 class="spec-group__title">Характеристики</h3>
               <dl class="spec-list spec-list--full">
-                <div><dt>Основа</dt><dd id="specBase">—</dd></div>
-                <div><dt>Толщина основы</dt><dd id="specBaseThickness">—</dd></div>
-                <div id="specBaseThicknessNoteRow" class="spec-list__nested is-hidden"><dt></dt><dd>* Нестандартная толщина</dd></div>
-                <div><dt>Толщина лицевого шпона</dt><dd id="specTopLayer">—</dd></div>
-                <div><dt>Общая толщина доски</dt><dd id="specThickness">—</dd></div>
-                <div><dt>Наименование шпона</dt><dd id="specSpecies">—</dd></div>
+                <div><dt>Нижний слой</dt><dd id="specBase">—</dd></div>
+                <div><dt>Толщина нижнего слоя</dt><dd id="specBaseThickness">—</dd></div>
+                <div><dt>Верхний слой</dt><dd id="specTopLayer">—</dd></div>
+                <div><dt>Толщина</dt><dd id="specThickness">—</dd></div>
+                <div id="specSpeciesRow"><dt id="specSpeciesLabel">Наименование шпона</dt><dd id="specSpecies">—</dd></div>
+                <div id="specSpeciesNameRow" class="is-hidden"><dt>Наименование</dt><dd id="specSpeciesName">—</dd></div>
                 <div class="spec-list__nested"><dt>Тип шпона</dt><dd id="specMaterialType">—</dd></div>
+                <div class="spec-list__nested"><dt>Страна происхождения шпона</dt><dd>—</dd></div>
                 <div class="spec-list__nested"><dt>Тип рисунка</dt><dd id="specPatternType">—</dd></div>
-                <div class="spec-list__nested"><dt>Сортировка</dt><dd id="specSorting">—</dd></div>
-                <div class="spec-list__nested"><dt>Тип соединения</dt><dd id="specConnection">—</dd></div>
+                <div><dt>Сортировка</dt><dd id="specSorting">—</dd></div>
 
-                <div><dt>Ширина доски</dt><dd id="specWidth">—</dd></div>
-                <div><dt>Длина ламелей</dt><dd id="specLength">—</dd></div>
+                <div><dt>Ширина</dt><dd id="specWidth">—</dd></div>
+                <div><dt>Длина</dt><dd id="specLength">—</dd></div>
+                <div><dt>Тип соединения</dt><dd id="specConnection">—</dd></div>
                 <div><dt>Итого к расчёту — количество, м²</dt><dd id="specAreaWithWaste">—</dd></div>
                 <div class="spec-list__nested"><dt>Количество без учёта отходов</dt><dd id="specBaseArea">—</dd></div>
                 <div class="spec-list__nested"><dt>Процент отходов</dt><dd id="specWaste">—</dd></div>
 
-                <div><dt>Раскладка доски</dt><dd id="specPattern">—</dd></div>
+                <div><dt>Раскладка</dt><dd id="specPattern">—</dd></div>
                 <div id="specAngleRow" class="spec-list__nested is-hidden"><dt>Угол торцевого реза</dt><dd id="specAngle">—</dd></div>
-                <div id="specCustomPatternRow" class="spec-list__nested is-hidden"><dt>Описание по ТЗ</dt><dd id="specCustomPattern">—</dd></div>
-                <div id="specCustomPatternFileRow" class="spec-list__nested is-hidden"><dt>Файлы раскладки по ТЗ</dt><dd id="specCustomPatternFile">—</dd></div>
+                <div id="specCustomPatternRow" class="spec-list__nested is-hidden"><dt>Описание индивидуальной раскладки</dt><dd id="specCustomPattern">—</dd></div>
+                <div id="specCustomPatternFileRow" class="spec-list__nested is-hidden"><dt>Файлы индивидуальной раскладки</dt><dd id="specCustomPatternFile">—</dd></div>
 
                 <div><dt>Покрытие</dt><dd id="specCoating">—</dd></div>
                 <div id="specGlossRow" class="spec-list__nested is-hidden"><dt>Степень блеска</dt><dd id="specGloss">—</dd></div>
 
                 <div><dt>Комментарий</dt><dd id="specComment">—</dd></div>
                 <div id="specFilesRow" class="is-hidden"><dt>Файлы к позиции</dt><dd id="specFiles">—</dd></div>
+              </dl>
+            </section>
+
+            <section class="spec-group">
+              <dl class="spec-list spec-list--full">
+                <div><dt>Подходит для тёплого пола</dt><dd id="specUnderfloorHeating">—</dd></div>
+                <div><dt>Конструкция</dt><dd>Запатентованная ламель WOODSTOCK</dd></div>
               </dl>
             </section>
 

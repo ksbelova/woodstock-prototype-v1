@@ -29,12 +29,14 @@ const form = {
 
 const ui = Object.fromEntries([
   "speciesSuggestions",
+  "citySuggestions",
   "speciesHint",
   "topLayerHint",
   "customPatternField",
   "customPatternWarning",
   "customPatternFileName",
   "quickWasteHint",
+  "volumeDiscountHint",
   "finishHint",
   "boardSizeFields",
   "boardWidthWarning",
@@ -66,6 +68,41 @@ const validation = {
 
 const finishLabels = {};
 
+const CITY_OPTIONS = [
+  { group: "Россия", city: "Москва", code: "+7" },
+  { group: "Россия", city: "Санкт-Петербург", code: "+7" },
+  { group: "Россия", city: "Нижний Новгород", code: "+7" },
+  { group: "Россия", city: "Ковров", code: "+7" },
+  { group: "Россия", city: "Брянск", code: "+7" },
+  { group: "Россия", city: "Ростов-на-Дону", code: "+7" },
+  { group: "Россия", city: "Краснодар", code: "+7" },
+  { group: "Россия", city: "Казань", code: "+7" },
+  { group: "Россия", city: "Ульяновск", code: "+7" },
+  { group: "Россия", city: "Самара", code: "+7" },
+  { group: "Россия", city: "Екатеринбург", code: "+7" },
+  { group: "Россия", city: "Новосибирск", code: "+7" },
+  { group: "СНГ", city: "Минск, Беларусь", code: "+375" },
+  { group: "СНГ", city: "Алматы, Казахстан", code: "+7" },
+  { group: "СНГ", city: "Астана, Казахстан", code: "+7" },
+  { group: "СНГ", city: "Ташкент, Узбекистан", code: "+998" },
+  { group: "СНГ", city: "Бишкек, Кыргызстан", code: "+996" },
+  { group: "СНГ", city: "Ереван, Армения", code: "+374" },
+  { group: "СНГ", city: "Баку, Азербайджан", code: "+994" },
+  { group: "СНГ", city: "Душанбе, Таджикистан", code: "+992" }
+];
+
+const PHONE_MASKS = {
+  "+7": { nationalDigits: 10, groups: [3, 3, 2, 2] },
+  "+375": { nationalDigits: 9, groups: [2, 3, 2, 2] },
+  "+998": { nationalDigits: 9, groups: [2, 3, 2, 2] },
+  "+996": { nationalDigits: 9, groups: [3, 3, 3] },
+  "+374": { nationalDigits: 8, groups: [2, 3, 3] },
+  "+994": { nationalDigits: 9, groups: [2, 3, 2, 2] },
+  "+992": { nationalDigits: 9, groups: [2, 3, 2, 2] }
+};
+
+const PHONE_CODES = Object.keys(PHONE_MASKS).sort((a, b) => b.length - a.length);
+
 const money = new Intl.NumberFormat("ru-RU", {
   style: "currency",
   currency: "RUB",
@@ -78,14 +115,11 @@ const number = new Intl.NumberFormat("ru-RU", {
 });
 
 let flooringData = null;
+let veneerSelector = null;
 let currentItem = null;
 let submitAttempted = false;
 const uploadedFilesState = new WeakMap();
 const touchedFields = new Set();
-
-function normalizeText(value) {
-  return String(value || "").trim().toLocaleLowerCase("ru-RU");
-}
 
 function round(value, digits = 2) {
   const factor = 10 ** digits;
@@ -122,18 +156,37 @@ function fillOptions(select, options, placeholder) {
   });
 }
 
-function patternAllowedForTopLayer(pattern) {
-  const allowedTopLayers = pattern?.allowedTopLayers || [];
-
-  return (
-    !allowedTopLayers.length ||
-    !form.topLayer.value ||
-    allowedTopLayers.includes(form.topLayer.value)
+function topLayerThicknessMm(value) {
+  const parsed = Number(
+    String(value || "")
+      .replace(",", ".")
+      .replace(/[^0-9.]/g, "")
   );
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function patternUnavailableReason(pattern) {
+  const minTopLayerMm = Number(pattern?.minTopLayerMm);
+  const selectedTopLayerMm = topLayerThicknessMm(form.topLayer.value);
+
+  if (!Number.isFinite(minTopLayerMm)) {
+    return "";
+  }
+
+  if (selectedTopLayerMm !== null && selectedTopLayerMm >= minTopLayerMm) {
+    return "";
+  }
+
+  return `доступно от ${number.format(minTopLayerMm)} мм`;
+}
+
+function patternAllowedForTopLayer(pattern) {
+  return Boolean(pattern) && !patternUnavailableReason(pattern);
 }
 
 function availablePatterns() {
-  return (flooringData?.patterns || []).filter(patternAllowedForTopLayer);
+  return flooringData?.patterns || [];
 }
 
 function selectedPattern() {
@@ -142,111 +195,57 @@ function selectedPattern() {
 }
 
 function speciesItems() {
-  const topLayer = form.topLayer.value;
-  return (flooringData?.items || []).filter((item) => !topLayer || item.topLayer === topLayer);
-}
-
-function availableSpeciesNames() {
-  return [...new Set(speciesItems().map((item) => item.species))]
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b, "ru"));
+  return veneerSelector?.itemsForCurrentType() || [];
 }
 
 function exactSpeciesItem() {
-  const name = normalizeText(form.species.value);
-
-  if (!name) {
-    return null;
-  }
-
-  return speciesItems().find(
-    (item) => normalizeText(item.species) === name
-  ) || null;
+  return veneerSelector?.exactItem() || null;
 }
 
 function speciesProducts() {
-  const species = normalizeText(form.species.value);
+  return veneerSelector?.selectedProducts() || [];
+}
 
-  if (!species) {
-    return [];
+function exactProductItem() {
+  if (!form.species.value.trim() || !form.topLayer.value) {
+    currentItem = null;
+    return null;
   }
 
-  return speciesItems().filter((item) => (
-    normalizeText(item.species) === species
-    && (!form.materialType.value || item.materialType === form.materialType.value)
-  ));
+  currentItem = speciesProducts().find(
+    (item) => item.topLayer === form.topLayer.value
+  ) || null;
+
+  return currentItem;
 }
 
 function exactSpeciesExists() {
   return Boolean(exactSpeciesItem());
 }
 
-function exactProductItem() {
-  if (!form.topLayer.value) return null;
-
-  return speciesProducts().find((item) => (
-    item.topLayer === form.topLayer.value && item.sorting === "Select+"
-  )) || null;
-}
-
 function closeSpeciesSuggestions() {
-  ui.speciesSuggestions.classList.add("is-hidden");
-  form.species.setAttribute("aria-expanded", "false");
-}
-
-function selectSpeciesSuggestion(name) {
-  form.species.value = name;
-  closeSpeciesSuggestions();
-  applySpeciesSelection();
-  form.topLayer.focus();
+  veneerSelector?.closeSuggestions();
 }
 
 function renderSpeciesSuggestions() {
-  const query = normalizeText(form.species.value);
-  const names = availableSpeciesNames();
-  const filtered = names.filter((name) => normalizeText(name).includes(query));
-
-  ui.speciesSuggestions.replaceChildren();
-
-  if (!filtered.length) {
-    const empty = document.createElement("div");
-    empty.className = "autocomplete-empty";
-    empty.textContent = "Ничего не найдено";
-    ui.speciesSuggestions.append(empty);
-  } else {
-    filtered.forEach((name) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "autocomplete-option";
-      button.setAttribute("role", "option");
-      button.textContent = name;
-      button.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-        selectSpeciesSuggestion(name);
-      });
-      ui.speciesSuggestions.append(button);
-    });
-  }
-
-  ui.speciesSuggestions.classList.remove("is-hidden");
-  form.species.setAttribute("aria-expanded", "true");
+  veneerSelector?.renderSuggestions();
 }
 
 function refreshSpeciesOptions() {
-  if (document.activeElement === form.species) {
-    renderSpeciesSuggestions();
-  }
+  veneerSelector?.refreshSuggestions();
 }
 
 function updateSpeciesClearButton() {
-  form.speciesClear.classList.toggle("is-hidden", !form.species.value.trim());
+  veneerSelector?.updateClearButton();
 }
 
 function fillTopLayerOptions() {
   const currentValue = form.topLayer.value;
+  const selectedProducts = speciesProducts();
+  const sourceItems = selectedProducts.length ? selectedProducts : speciesItems();
   const productLayers = [
     ...new Set(
-      speciesProducts()
+      sourceItems
         .map((item) => item.topLayer)
         .filter(Boolean)
     )
@@ -261,13 +260,15 @@ function fillTopLayerOptions() {
   fillOptions(
     form.topLayer,
     layers.map((layer) => ({ value: layer, label: layer })),
-    "Выберите толщину"
+    "Выберите верхний слой"
   );
 
   form.topLayer.disabled = false;
 
   if (layers.includes(currentValue)) {
     form.topLayer.value = currentValue;
+  } else if (currentValue) {
+    form.topLayer.value = "";
   }
 }
 
@@ -284,18 +285,12 @@ function applySpeciesSelection() {
   const speciesMatch = exactSpeciesItem();
 
   if (!speciesMatch) {
-    form.materialType.value = "";
     clearProductSelection();
     ui.speciesHint.textContent = form.species.value.trim()
       ? "Выберите наименование из списка."
       : "";
     renderAll();
     return;
-  }
-
-  if (form.materialType.value !== speciesMatch.materialType) {
-    form.materialType.value = speciesMatch.materialType;
-    refreshSpeciesOptions();
   }
 
   fillTopLayerOptions();
@@ -326,17 +321,31 @@ function fillPatterns() {
   const currentValue = form.pattern.value;
   const patterns = availablePatterns();
 
-  fillOptions(
-    form.pattern,
-    patterns.map((pattern) => ({ value: pattern.id, label: pattern.name })),
-    "Выберите раскладку"
-  );
+  form.pattern.replaceChildren();
+  const first = document.createElement("option");
+  first.value = "";
+  first.textContent = "Выберите раскладку";
+  form.pattern.append(first);
 
-  if (patterns.some((pattern) => pattern.id === currentValue)) {
+  patterns.forEach((pattern) => {
+    const unavailableReason = patternUnavailableReason(pattern);
+    const option = document.createElement("option");
+    option.value = pattern.id;
+    option.textContent = unavailableReason
+      ? `${pattern.name} — ${unavailableReason}`
+      : pattern.name;
+    option.disabled = Boolean(unavailableReason);
+    if (unavailableReason) option.title = unavailableReason;
+    form.pattern.append(option);
+  });
+
+  const currentPattern = patterns.find((pattern) => pattern.id === currentValue);
+  if (currentPattern && patternAllowedForTopLayer(currentPattern)) {
     form.pattern.value = currentValue;
     return false;
   }
 
+  form.pattern.value = "";
   return Boolean(currentValue);
 }
 
@@ -482,19 +491,7 @@ function toggleBoardSizes() {
 }
 
 function quickWasteHintText(pattern) {
-  if (!pattern || pattern.id === "custom") return "";
-
-  if (pattern.id === "deck" || pattern.id === "equal_length") {
-    return "Рекомендуемый запас: 5–10%. Точное значение зависит от геометрии помещения и проекта.";
-  }
-
-  if (pattern.id === "french_herringbone" || pattern.id === "hungarian_herringbone") {
-    return "Рекомендуемый запас: не менее 15%. Точное значение зависит от геометрии помещения и проекта.";
-  }
-
-  return pattern.wasteHint
-    ? `${pattern.wasteHint} Точное значение зависит от геометрии помещения и проекта.`
-    : "";
+  return pattern?.wasteHint || "";
 }
 
 function applyPattern() {
@@ -595,6 +592,9 @@ function renderArea() {
   const area = priceArea();
   const roomArea = Number(form.roomArea.value);
   const waste = Number(form.waste.value);
+  const validRoomArea = Number.isFinite(roomArea) && roomArea > 0;
+
+  ui.volumeDiscountHint?.classList.toggle("is-hidden", !validRoomArea);
 
   if (area !== null) {
     ui.areaWithWasteValue.textContent = `${number.format(area)} м²`;
@@ -620,8 +620,122 @@ function renderResult() {
   ui.resultTotal.textContent = calc.total ? money.format(calc.total) : "—";
 }
 
+function normalizeCitySearch(value) {
+  return String(value || "").trim().toLocaleLowerCase("ru-RU");
+}
+
+function closeCitySuggestions() {
+  if (!ui.citySuggestions) return;
+  ui.citySuggestions.classList.add("is-hidden");
+  ui.citySuggestions.replaceChildren();
+  form.city.setAttribute("aria-expanded", "false");
+}
+
+function setPhoneCountryCode(code) {
+  const currentValue = String(form.phone.value || "");
+  const currentDigits = phoneDigits(currentValue);
+  const currentCode = recognizedPhoneCode(currentValue);
+  const hasLeadingPlus = currentValue.trimStart().startsWith("+");
+  let nationalDigits = "";
+
+  if (currentCode) {
+    nationalDigits = currentDigits.slice(currentCode.slice(1).length);
+  } else if (!hasLeadingPlus) {
+    nationalDigits = currentDigits;
+  }
+
+  form.phone.value = formatPhone(`${code}${nationalDigits}`);
+}
+
+function selectCityOption(item) {
+  form.city.value = item.city;
+  closeCitySuggestions();
+  setPhoneCountryCode(item.code);
+
+  if (submitAttempted) validateAll();
+}
+
+function renderCitySuggestions() {
+  if (!ui.citySuggestions) return;
+
+  const query = normalizeCitySearch(form.city.value);
+  const matches = CITY_OPTIONS.filter((item) => {
+    if (!query) return true;
+    return normalizeCitySearch(`${item.city} ${item.group}`).includes(query);
+  });
+
+  ui.citySuggestions.replaceChildren();
+
+  if (!matches.length) {
+    const empty = document.createElement("div");
+    empty.className = "autocomplete-empty";
+    empty.textContent = "Город не найден — можно продолжить ввод вручную.";
+    ui.citySuggestions.append(empty);
+  } else {
+    ["Россия", "СНГ"].forEach((group) => {
+      const groupItems = matches.filter((item) => item.group === group);
+      if (!groupItems.length) return;
+
+      const heading = document.createElement("div");
+      heading.className = "autocomplete-empty";
+      heading.textContent = group;
+      heading.setAttribute("aria-hidden", "true");
+      ui.citySuggestions.append(heading);
+
+      groupItems.forEach((item) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "autocomplete-option";
+        button.setAttribute("role", "option");
+        button.textContent = item.city;
+        button.addEventListener("mousedown", (event) => event.preventDefault());
+        button.addEventListener("click", () => selectCityOption(item));
+        ui.citySuggestions.append(button);
+      });
+    });
+  }
+
+  ui.citySuggestions.classList.remove("is-hidden");
+  form.city.setAttribute("aria-expanded", "true");
+}
+
 function phoneDigits(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 15);
+}
+
+function recognizedPhoneCode(value) {
+  const rawValue = String(value || "").trimStart();
+  if (!rawValue.startsWith("+")) return null;
+
+  const digits = phoneDigits(rawValue);
+  const matched = PHONE_CODES.find((code) => digits.startsWith(code.slice(1)));
+  return matched || null;
+}
+
+function formatKnownPhone(code, nationalDigits) {
+  const mask = PHONE_MASKS[code];
+  const digits = String(nationalDigits || "").slice(0, mask.nationalDigits);
+  if (!digits) return code;
+
+  let output = code;
+  let offset = 0;
+
+  mask.groups.forEach((size, index) => {
+    const part = digits.slice(offset, offset + size);
+    if (!part) return;
+
+    if (index === 0) {
+      output += ` (${part}${part.length === size ? ")" : ""}`;
+    } else if (index === 1) {
+      output += ` ${part}`;
+    } else {
+      output += `-${part}`;
+    }
+
+    offset += size;
+  });
+
+  return output;
 }
 
 function formatPhone(value) {
@@ -631,13 +745,29 @@ function formatPhone(value) {
 
   if (!digits) return hasLeadingPlus ? "+" : "";
 
-  // Не навязываем код страны: пользователь может ввести российский,
-  // белорусский или любой другой международный номер.
-  return `${hasLeadingPlus ? "+" : ""}${digits}`;
+  const code = recognizedPhoneCode(rawValue);
+  if (!code) {
+    return `${hasLeadingPlus ? "+" : ""}${digits}`;
+  }
+
+  const codeDigits = code.slice(1);
+  return formatKnownPhone(code, digits.slice(codeDigits.length));
 }
 
 function applyPhoneMask() {
   form.phone.value = formatPhone(form.phone.value);
+}
+
+function validPhone(value) {
+  const digits = phoneDigits(value);
+  const code = recognizedPhoneCode(value);
+
+  if (!code) {
+    return digits.length >= 10 && digits.length <= 15;
+  }
+
+  const codeDigits = code.slice(1).length;
+  return digits.length === codeDigits + PHONE_MASKS[code].nationalDigits;
 }
 
 function normalizeEmail(value) {
@@ -666,7 +796,6 @@ function validateEmail(value) {
 function validateAll() {
   const issues = [];
   const roomArea = Number(form.roomArea.value);
-  const enteredPhoneDigits = phoneDigits(form.phone.value);
   const limits = selectedPattern()?.limits;
   const width = Number(form.boardWidth.value);
   const length = Number(form.boardLength.value);
@@ -693,15 +822,14 @@ function validateAll() {
 
   const checks = [
     ["species", exactSpeciesExists() ? "" : "Выберите наименование шпона из списка.", form.species],
-    ["topLayer", currentItem ? "" : "Выберите толщину лицевого шпона.", form.topLayer],
+    ["topLayer", currentItem ? "" : "Выберите верхний слой.", form.topLayer],
     ["pattern", form.pattern.value ? "" : "Выберите раскладку.", form.pattern],
     ["customPattern", customPatternMessage, form.customPattern],
     ["boardWidth", widthMessage, form.boardWidth],
     ["boardLength", lengthMessage, form.boardLength],
     ["roomArea", Number.isFinite(roomArea) && roomArea > 0 ? "" : "Укажите площадь помещения больше 0.", form.roomArea],
-    ["finish", form.finish.value ? "" : "Выберите покрытие.", form.finish],
     ["name", form.name.value.trim() ? "" : "Укажите имя.", form.name],
-    ["phone", enteredPhoneDigits.length >= 10 && enteredPhoneDigits.length <= 15 ? "" : "Укажите номер телефона: от 10 до 15 цифр.", form.phone],
+    ["phone", validPhone(form.phone.value) ? "" : "Проверьте номер телефона.", form.phone],
     ["city", form.city.value.trim() ? "" : "Укажите город.", form.city],
     ["email", validateEmail(normalizeEmail(form.email.value)) ? "" : "Проверьте адрес электронной почты.", form.email],
     ["privacy", form.privacy.checked ? "" : "Необходимо согласие на обработку данных.", form.privacy]
@@ -931,6 +1059,16 @@ function pdfValue(value, fallback = "—") {
   return normalized || fallback;
 }
 
+function connectionTypeForLength(value, fallback = "Определяется после уточнения длины") {
+  const length = Number(value);
+
+  if (!Number.isFinite(length) || length <= 0) return fallback;
+  if (length >= 600 && length <= 2400) return "Шип-паз";
+  if (length >= 2401 && length <= 3000) return "Паз-паз на шпонку";
+
+  return fallback;
+}
+
 function pdfBaseMaterial(value) {
   return pdfValue(value).replace(/берёзы/g, "берёзы");
 }
@@ -945,7 +1083,7 @@ function pdfFinishLabel(finish) {
 function compoundPdfCell(mainValue, details = []) {
   const visibleDetails = details.filter((item) => {
     const value = String(item?.value ?? "").trim();
-    return value && value !== "—";
+    return value && (value !== "—" || item?.label === "Страна происхождения шпона");
   });
 
   const stack = [
@@ -986,6 +1124,9 @@ function createPdfDocument(payload) {
   const layoutFiles = customLayout ? payload.layout.customPatternFiles.join(", ") : "";
   const layoutDescription = customLayout ? payload.layout.customPatternDescription : "";
   const calcNumber = calculationNumber(payload);
+  const connectionType = connectionTypeForLength(payload.layout.boardLength);
+  const includeSplineNote = connectionType === "Паз-паз на шпонку";
+  const underfloorHeating = Core.underfloorHeatingLabel(payload.material.topLayer);
 
   const clientBody = [[
     {
@@ -1026,17 +1167,40 @@ function createPdfDocument(payload) {
     }
   ]];
 
+  const multishpon = payload.material.typeId === "multishpon";
+  const multishponParts = Core.splitMultishponName(flooringData, payload.material.species);
+  const veneerHeaderLabels = multishpon
+    ? ["Коллекция", "Наименование"]
+    : [payload.material.typeId === "design" ? "Порода дерева и оттенок" : "Порода дерева"];
+  const veneerCells = multishpon
+    ? [
+        compoundPdfCell(multishponParts.collection),
+        compoundPdfCell(multishponParts.name, [
+          { label: "Тип шпона", value: payload.material.typeName },
+          { label: "Страна происхождения шпона", value: "—" },
+          { label: "Тип рисунка", value: payload.material.patternType }
+        ])
+      ]
+    : [
+        compoundPdfCell(payload.material.species, [
+          { label: "Тип шпона", value: payload.material.typeName },
+          { label: "Страна происхождения шпона", value: "—" },
+          { label: "Тип рисунка", value: payload.material.patternType }
+        ])
+      ];
+
   const productHeader = [
     "№ П/П",
-    "Основа",
-    "Толщина основы",
-    "Толщина лицевого шпона",
-    "Общая толщина доски",
-    "Наименование шпона",
-    "Ширина доски",
-    "Длина ламелей",
+    "Нижний слой",
+    "Толщина нижнего слоя",
+    "Верхний слой",
+    "Толщина",
+    ...veneerHeaderLabels,
+    "Ширина",
+    "Длина",
+    "Тип соединения",
     "Итого к расчёту — количество м²",
-    "Раскладка доски",
+    "Раскладка",
     "Покрытие"
   ].map((text) => ({ text, style: "tableHeader", alignment: "center" }));
 
@@ -1046,25 +1210,24 @@ function createPdfDocument(payload) {
     compoundPdfCell(Number.isFinite(baseThickness) ? `${number.format(baseThickness)} мм` : "—"),
     compoundPdfCell(payload.material.topLayer),
     compoundPdfCell(Number.isFinite(overallThickness) ? `${number.format(overallThickness)} мм` : "—"),
-    compoundPdfCell(payload.material.species, [
-      { label: "Тип шпона", value: payload.material.typeName },
-      { label: "Тип рисунка", value: payload.material.patternType },
-      { label: "Сортировка", value: currentItem?.sorting || flooringData?.meta?.sorting },
-      { label: "Тип соединения", value: currentItem?.connection || flooringData?.meta?.connection }
-    ]),
+    ...veneerCells,
     compoundPdfCell(payload.layout.boardWidth ? `${number.format(payload.layout.boardWidth)} мм` : "—"),
     compoundPdfCell(payload.layout.boardLength ? `${number.format(payload.layout.boardLength)} мм` : "—"),
+    compoundPdfCell(connectionType),
     compoundPdfCell(`${number.format(payload.layout.areaWithWaste)} м²`, [
-      { label: "Доска без отходов", value: `${number.format(payload.layout.roomArea)} м²` },
+      { label: "Площадь помещения", value: `${number.format(payload.layout.roomArea)} м²` },
       { label: "Процент отходов", value: `${number.format(payload.layout.wastePercent)}%` }
     ]),
     compoundPdfCell(payload.layout.name, [
       { label: "Угол торцевого реза", value: angle },
-      { label: "Описание по ТЗ", value: layoutDescription },
-      { label: "Файлы раскладки по ТЗ", value: layoutFiles }
+      { label: "Описание индивидуальной раскладки", value: layoutDescription },
+      { label: "Файлы индивидуальной раскладки", value: layoutFiles }
     ]),
     compoundPdfCell(pdfFinishLabel(payload.finish))
   ];
+  const productBaseWidths = multishpon
+    ? [15, 41, 32, 35, 36, 38, 45, 32, 35, 55, 62, 72, 65]
+    : [15, 41, 32, 35, 36, 75, 32, 35, 55, 62, 72, 65];
 
   return {
     pageSize: "A4",
@@ -1146,7 +1309,7 @@ function createPdfDocument(payload) {
       {
         table: {
           headerRows: 1,
-          widths: fitPdfTableWidths([15, 41, 32, 35, 36, 75, 32, 35, 62, 72, 65], 2.2),
+          widths: fitPdfTableWidths(productBaseWidths, 2.2),
           body: [productHeader, productRow],
           dontBreakRows: true
         },
@@ -1158,6 +1321,37 @@ function createPdfDocument(payload) {
             return rowIndex === 0 ? "#F0F0ED" : null;
           }
         }
+      },
+      ...(includeSplineNote ? [{
+        text: "Шпонка поставляется в комплекте.",
+        style: "infoSmall",
+        margin: [0, 3, 0, 0]
+      }] : []),
+      {
+        stack: [
+          {
+            text: [
+              { text: "Сортировка Селект+. ", bold: true },
+              "Заказчику предоставляем возможность выбрать пачки шпона, текстуру и цвет, которые будут на напольном покрытии."
+            ]
+          },
+          {
+            text: [
+              { text: "Подходит для тёплого пола — ", bold: true },
+              underfloorHeating
+            ],
+            margin: [0, 3, 0, 0]
+          },
+          {
+            text: [
+              { text: "Конструкция — ", bold: true },
+              "Запатентованная ламель WOODSTOCK"
+            ],
+            margin: [0, 3, 0, 0]
+          }
+        ],
+        style: "infoSmall",
+        margin: [0, 4, 0, 0]
       },
       { text: "Ориентировочная стоимость", style: "sectionTitle" },
       {
@@ -1226,12 +1420,6 @@ function createPdfDocument(payload) {
       },
       {
         ul: [
-          {
-            text: [
-              { text: "Сортировка Select+. ", bold: true },
-              "Заказчику предоставляем возможность выбрать пачки шпона и цвет, которые будут на напольном покрытии."
-            ]
-          },
           "Дерево — это натуральный материал, поэтому некоторые вариации в цвете, тоне и текстуре допустимы. Их интенсивность зависит от природных характеристик определенных пород древесины, выбранных пачек шпона заказчиком и дополнительно подчеркивает натуральность материала.",
           "Лицевой шпон инженерной доски WOODSTOCK изготавливается из ценных пород древесины, выбранных заказчиком, и дополнен внутренними слоями пород, гармонично сочетающихся по цвету и обладающих необходимой твердостью для применения в напольных покрытиях.",
           { text: "Инструкция по монтажу и эксплуатации инженерной доски WOODSTOCK", bold: true }
@@ -1256,7 +1444,7 @@ function createPdfDocument(payload) {
             width: "*",
             stack: [
               { text: "С уважением,", margin: [0, 0, 0, 3] },
-              { text: "Кудрявцев Николай", bold: true },
+              { text: "Громов Николай", bold: true },
               { text: "Руководитель направления" },
               { text: "АО «Вудсток»", margin: [0, 0, 0, 5] },
               { text: "+7 (495) 617-17-99 доб. 1367" },
@@ -1321,7 +1509,7 @@ function submitCalculation() {
     ui.saveStatus.textContent = `Заполните обязательные поля: ${issues.map((issue) => {
       const labels = {
         species: "наименование шпона",
-        topLayer: "толщина лицевого шпона",
+        topLayer: "верхний слой",
         pattern: "раскладка",
         customPattern: "описание раскладки или файл",
         boardWidth: "ширина доски",
@@ -1358,7 +1546,15 @@ function submitCalculation() {
 function renderAll() {
   renderArea();
   renderResult();
-  ui.finishHint?.classList.toggle("is-hidden", form.finish.value !== "uv_lacquer");
+  if (ui.finishHint) {
+    const finishHintText = form.finish.value === "uv_lacquer"
+      ? "Стандартный блеск УФ-лака — 10%. Другой вариант можно согласовать с менеджером."
+      : form.finish.value === "parquet_lacquer"
+        ? "Стандартный блеск Паркетного лака — 10%. Другой вариант можно согласовать с менеджером."
+        : "";
+    ui.finishHint.textContent = finishHintText;
+    ui.finishHint.classList.toggle("is-hidden", !finishHintText);
+  }
   validateBoardSizeFields();
 
   const width = Number(form.boardWidth.value);
@@ -1385,6 +1581,18 @@ async function init() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     flooringData = await response.json();
+    veneerSelector = Core.createVeneerSelector({
+      data: flooringData,
+      materialTypeSelect: form.materialType,
+      speciesInput: form.species,
+      clearButton: form.speciesClear,
+      suggestions: ui.speciesSuggestions,
+      focusAfterSelect: form.topLayer,
+      onChange: () => {
+        currentItem = null;
+        applySpeciesSelection();
+      }
+    });
     const quickCoatings = Core.quickCoatingOptions(flooringData);
     fillOptions(
       form.finish,
@@ -1400,32 +1608,6 @@ async function init() {
     ui.saveStatus.textContent = "Не удалось загрузить каталог. Обновите страницу или обратитесь к менеджеру.";
     ui.getCalculationButton.disabled = true;
   }
-
-  form.species.addEventListener("input", () => {
-    currentItem = null;
-    updateSpeciesClearButton();
-    renderSpeciesSuggestions();
-
-    if (exactSpeciesExists()) {
-      applySpeciesSelection();
-    } else {
-      clearProductSelection();
-      renderAll();
-    }
-  });
-
-  form.species.addEventListener("focus", renderSpeciesSuggestions);
-  form.species.addEventListener("blur", () => setTimeout(closeSpeciesSuggestions, 120));
-
-  form.speciesClear.addEventListener("click", () => {
-    form.species.value = "";
-    form.materialType.value = "";
-    clearProductSelection();
-    updateSpeciesClearButton();
-    closeSpeciesSuggestions();
-    form.species.focus();
-    renderAll();
-  });
 
   form.topLayer.addEventListener("change", () => {
     if (document.activeElement === form.species) renderSpeciesSuggestions();
@@ -1471,6 +1653,17 @@ async function init() {
   form.roomArea.addEventListener("input", renderAll);
   form.finish.addEventListener("change", renderAll);
   form.files.addEventListener("change", renderFiles);
+  form.city.addEventListener("focus", renderCitySuggestions);
+  form.city.addEventListener("click", renderCitySuggestions);
+  form.city.addEventListener("input", renderCitySuggestions);
+  form.city.addEventListener("blur", () => setTimeout(closeCitySuggestions, 0));
+  form.city.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeCitySuggestions();
+  });
+  document.addEventListener("pointerdown", (event) => {
+    const cityField = form.city.closest(".autocomplete-field");
+    if (cityField && !cityField.contains(event.target)) closeCitySuggestions();
+  });
   form.phone.addEventListener("input", applyPhoneMask);
   form.phone.addEventListener("blur", applyPhoneMask);
   form.email.addEventListener("input", applyEmailMask);
@@ -1503,9 +1696,6 @@ async function init() {
     });
   });
 
-  document.addEventListener("click", (event) => {
-    if (!event.target.closest("#speciesField")) closeSpeciesSuggestions();
-  });
 }
 
 init();
