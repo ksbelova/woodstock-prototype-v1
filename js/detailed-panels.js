@@ -2872,7 +2872,7 @@
       specRow("Шлифовка", sideText),
       ...finishSpecRows(globalFinish),
       ...positionFinishSpecRows,
-      ...(form.commentInput.value.trim() ? [specRow("Комментарий к позиции", form.commentInput.value.trim())] : []),
+      ...(form.commentInput.value.trim() ? [specRow("Комментарий к ", form.commentInput.value.trim())] : []),
       ...(selectedFiles.length ? [specRow("Файлы к позиции", selectedFiles.join(", "))] : [])
     ];
     form.specCharacteristics.innerHTML = characteristics.join("");

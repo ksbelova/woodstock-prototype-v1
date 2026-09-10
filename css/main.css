@@ -492,6 +492,23 @@ input[readonly]:focus {
   border-radius: 14px;
 }
 
+/* Индивидуальная раскладка: убираем двойной нижний отступ у поля
+   и отделяем информационное сообщение единым вертикальным ритмом. */
+#customPatternField {
+  margin-bottom: 0;
+}
+
+#customPatternField .file-upload-box {
+  margin-top: 16px;
+  margin-bottom: 0;
+  display: grid;
+  gap: 8px;
+}
+
+#customPatternWarning:not(.is-hidden) {
+  margin-top: 24px;
+}
+
 /* ========================================
    Инженерная доска: служебные элементы
 ======================================== */
@@ -615,6 +632,16 @@ input[readonly]:focus {
   line-height: 1.4;
   color: var(--text);
   text-align: right;
+}
+
+.spec-value-note {
+  display: block;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
 }
 
 .formula-box {
@@ -1187,12 +1214,8 @@ input[type="file"]::file-selector-button:hover {
   margin-bottom: 0;
 }
 
-#quickFlooringForm .board-size-toggle[aria-expanded="true"] {
-  margin-bottom: 8px;
-}
-
 #quickFlooringForm .field-warning:not(.is-hidden) + .board-size-toggle {
-  margin-top: 8px;
+  margin-top: 24px;
 }
 
 #quickFlooringForm .quick-layout-options + .quick-area-subsection {
@@ -1201,6 +1224,11 @@ input[type="file"]::file-selector-button:hover {
 }
 
 #quickFlooringForm .quick-area-subsection .area-summary {
+  margin-top: 16px;
+}
+
+/* Notes placed immediately after a summary/info card use one shared spacing pattern. */
+.area-summary + .field__note {
   margin-top: 16px;
 }
 
@@ -1684,6 +1712,11 @@ input[type="file"]::file-selector-button:hover {
   .standard-size-values { grid-template-columns: 1fr; }
   .field-grid--size-row { grid-template-columns: 1fr; }
   .size-row__header { align-items: flex-start; }
+}
+
+/* Engineering flooring: one spacing rule for content revealed by text-action toggles. */
+.field-reveal-target {
+  margin-top: 20px;
 }
 
 #priceWarnings strong { display: block; margin-bottom: 8px; }

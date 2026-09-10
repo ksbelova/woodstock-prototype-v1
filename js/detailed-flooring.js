@@ -55,7 +55,6 @@ const ui = Object.fromEntries([
   "customPatternWarning",
   "customPatternFileName",
   "widthWarning",
-  "wasteHint",
   "areaSummary",
   "areaWithWasteValue",
   "areaWithWasteFormula",
@@ -68,7 +67,7 @@ const ui = Object.fromEntries([
   "priceStatus",
   "addToSpecButton",
   "specBase",
-  "specBaseThickness",
+  "specBaseNote",
   "specTopLayer",
   "specThickness",
   "specSpeciesRow",
@@ -95,6 +94,7 @@ const ui = Object.fromEntries([
   "specBaseArea",
   "specWaste",
   "specAreaWithWaste",
+  "specCommentRow",
   "specComment",
   "specFilesRow",
   "specFiles",
@@ -214,8 +214,8 @@ const number = new Intl.NumberFormat("ru-RU", {
   maximumFractionDigits: 2
 });
 
-function shouldShowError(key) {
-  return addAttempted || touchedFields.has(key);
+function shouldShowError(key, hasEnteredValue = false) {
+  return addAttempted || (hasEnteredValue && touchedFields.has(key));
 }
 
 function markFieldTouched(key) {
@@ -236,7 +236,7 @@ function connectionTypeForLength(value, fallback = "—") {
   const length = Number(value);
 
   if (!Number.isFinite(length) || length <= 0) return fallback;
-  if (length >= 600 && length <= 2400) return "Шип-паз";
+  if (length >= 400 && length <= 2400) return "Шип-паз";
   if (length >= 2401 && length <= 3000) return "Паз-паз на шпонку";
 
   return fallback;
@@ -285,11 +285,10 @@ function clampOnBlur(
   label,
   step = null
 ) {
-  markFieldTouched(key);
-
   const raw = input.value.trim();
 
   if (!raw) {
+    touchedFields.delete(key);
     renderAll();
     return;
   }
@@ -297,6 +296,7 @@ function clampOnBlur(
   const value = Number(raw);
 
   if (!Number.isFinite(value)) {
+    markFieldTouched(key);
     input.value = "";
 
     renderAll();
@@ -326,6 +326,7 @@ function clampOnBlur(
     aboveMaximum ||
     stepMismatch
   ) {
+    markFieldTouched(key);
     input.value = "";
 
     renderAll();
@@ -338,7 +339,11 @@ function clampOnBlur(
           ? `${label}: допустимо от ${min} до ${max}.`
           : `${label}: значение не меньше ${min}.`
     );
+    return;
   }
+
+  touchedFields.delete(key);
+  setFieldError(key, "");
 }
 
 function topLayerThicknessMm(value) {
@@ -469,35 +474,54 @@ function updateSpeciesClearButton() {
 
 function fillTopLayerOptions() {
   const currentValue = form.topLayer.value;
-  const selectedProducts = speciesProducts();
-  const sourceItems = selectedProducts.length ? selectedProducts : speciesItems();
-  const layers = [...new Set(sourceItems.map((item) => item.topLayer).filter(Boolean))];
-  const fallback = Object.keys(flooringData?.meta?.thicknessByTopLayer || {});
-  const availableLayers = layers.length ? layers : fallback;
+  const speciesMatch = exactSpeciesItem();
+  const availableLayers = speciesMatch
+    ? [...new Set(speciesProducts().map((item) => item.topLayer).filter(Boolean))]
+    : [];
 
   form.topLayer.innerHTML = "";
   form.topLayer.append(new Option("Выберите верхний слой", ""));
   availableLayers.forEach((topLayer) => form.topLayer.append(new Option(topLayer, topLayer)));
-  form.topLayer.disabled = false;
+  form.topLayer.disabled = !speciesMatch || !availableLayers.length;
 
   if (availableLayers.includes(currentValue)) {
     form.topLayer.value = currentValue;
-  } else if (currentValue) {
+  } else {
     form.topLayer.value = "";
     selectedTopLayerValue = "";
   }
 }
 
+function selectedVeneerDefinition() {
+  const speciesMatch = exactSpeciesItem();
+  if (!speciesMatch) return null;
+
+  return (flooringData?.veneers || []).find((veneer) => (
+    veneer.materialType === speciesMatch.materialType &&
+    veneer.species === speciesMatch.species
+  )) || null;
+}
+
+function patternTypesForSelectedSpecies() {
+  const veneer = selectedVeneerDefinition();
+  if (!Array.isArray(veneer?.patternTypes)) return [];
+
+  return [...new Set(
+    veneer.patternTypes
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  )];
+}
+
 function updatePatternTypeField() {
-  const materialType = form.materialType.value;
-  const isMulti = materialType === "multishpon";
-  const isRequired = materialType === "natural" || materialType === "design";
+  const speciesMatch = exactSpeciesItem();
+  const availablePatternTypes = patternTypesForSelectedSpecies();
   const currentValue = form.patternType.value;
 
   form.patternType.replaceChildren();
 
-  if (isMulti) {
-    form.patternType.append(new Option("Нет данных в справочнике", ""));
+  if (!speciesMatch) {
+    form.patternType.append(new Option("Выберите тип рисунка", ""));
     form.patternType.disabled = true;
     form.patternType.required = false;
     form.patternType.value = "";
@@ -506,22 +530,34 @@ function updatePatternTypeField() {
     return;
   }
 
-  form.patternType.append(new Option("Выберите тип рисунка", ""));
-  form.patternType.append(new Option("Радиальный", "Радиальный"));
-  form.patternType.append(new Option("Тангенциальный", "Тангенциальный"));
-  form.patternType.disabled = !isRequired;
-  form.patternType.required = isRequired;
-
-  if (isRequired && ["Радиальный", "Тангенциальный"].includes(currentValue)) {
-    form.patternType.value = currentValue;
-  } else {
+  if (!availablePatternTypes.length) {
+    form.patternType.append(new Option("Нет данных", ""));
+    form.patternType.disabled = true;
+    form.patternType.required = false;
     form.patternType.value = "";
-  }
-
-  if (!isRequired) {
     touchedFields.delete("patternType");
     setFieldError("patternType", "");
+    return;
   }
+
+  if (availablePatternTypes.length === 1) {
+    const [onlyValue] = availablePatternTypes;
+    form.patternType.append(new Option(onlyValue, onlyValue));
+    form.patternType.value = onlyValue;
+    form.patternType.disabled = true;
+    form.patternType.required = false;
+    touchedFields.delete("patternType");
+    setFieldError("patternType", "");
+    return;
+  }
+
+  form.patternType.append(new Option("Выберите тип рисунка", ""));
+  availablePatternTypes.forEach((patternType) => {
+    form.patternType.append(new Option(patternType, patternType));
+  });
+  form.patternType.disabled = false;
+  form.patternType.required = true;
+  form.patternType.value = availablePatternTypes.includes(currentValue) ? currentValue : "";
 }
 
 function clearSpeciesSelection() {
@@ -555,6 +591,25 @@ function renderBaseSummary() {
 
 function retailPrice() {
   return currentItem ? Core.catalogPrice(currentItem) : null;
+}
+
+function sanitizeCustomPriceValue(raw) {
+  let result = "";
+  let hasSeparator = false;
+
+  for (const char of String(raw ?? "")) {
+    if (/\d/.test(char)) {
+      result += char;
+      continue;
+    }
+
+    if ((char === "," || char === ".") && !hasSeparator) {
+      result += char;
+      hasSeparator = true;
+    }
+  }
+
+  return result;
 }
 
 function parseCustomPrice() {
@@ -618,7 +673,7 @@ function renderSelectionSurcharges() {
       renderSpecification();
     });
     const text = document.createElement("span");
-    text.innerHTML = `<strong>${option.name}</strong><small>Надбавка +${number.format(option.percent)}%</small>`;
+    text.innerHTML = `<strong>${option.name}</strong><small>+${number.format(option.percent)}% к стоимости</small>`;
     label.append(checkbox, text);
     ui.selectionSurchargeOptions.append(label);
   });
@@ -694,7 +749,7 @@ function applySpeciesSelection() {
 
     const speciesError =
       form.species.value.trim() &&
-      shouldShowError("species")
+      shouldShowError("species", Boolean(form.species.value.trim()))
         ? "Выберите точное наименование из справочника."
         : "";
 
@@ -808,8 +863,8 @@ function updateUnitPriceHint() {
     const valid = Number.isFinite(custom) && custom > 0;
     setFieldError(
       "customPrice",
-      shouldShowError("customPrice") && !valid
-        ? "Цена для расчёта: укажите значение больше 0."
+      shouldShowError("customPrice", Boolean(form.customPrice.value.trim())) && !valid
+        ? "Укажите цену для расчёта."
         : ""
     );
   } else {
@@ -947,9 +1002,6 @@ function applyPattern() {
     form.length.placeholder = "Сначала выберите раскладку";
     form.waste.placeholder = "Сначала выберите раскладку";
 
-    ui.wasteHint.textContent =
-      "Сначала выберите раскладку.";
-
     discountWasEdited = false;
     markupWasEdited = false;
 
@@ -1031,7 +1083,6 @@ function applyPattern() {
     form.waste.value = "";
   }
 
-  ui.wasteHint.textContent = pattern.wasteHint || "";
   discountWasEdited = false;
   markupWasEdited = false;
 
@@ -1066,11 +1117,11 @@ function applyCoating() {
       : String(options[0] ?? "");
 
     if (ui.glossLabel) {
-      ui.glossLabel.textContent = "Степень блеска, %";
+      ui.glossLabel.textContent = "Степень блеска";
     }
 
     if (ui.glossHint) {
-      ui.glossHint.textContent = "";
+      ui.glossHint.textContent = "Для тёмных пород шпона рекомендуется блеск не ниже 10%.";
     }
   } else {
     form.gloss.value = "";
@@ -1130,6 +1181,32 @@ function rememberPricingConditionSelection(type = pricingConditionType) {
   }
 }
 
+function syncSmallOrderClientConditions(area = priceArea()) {
+  const clientType = form.clientType.value || "client";
+  const threshold = Number(flooringData?.meta?.pricing?.smallOrderThresholdM2 || 20);
+  const smallOrder =
+    clientType === "client" &&
+    area !== null &&
+    Number.isFinite(Number(area)) &&
+    Number(area) < threshold;
+  const smallOrderMarkupDisabledManually =
+    smallOrder &&
+    markupOverrides.has("smallOrder") &&
+    Math.abs(Number(markupOverrides.get("smallOrder"))) < 0.000001;
+  const restrictClientConditions = smallOrder && !smallOrderMarkupDisabledManually;
+
+  Array.from(form.loyalty.options).forEach((option) => {
+    option.disabled = restrictClientConditions && option.value !== "retail";
+  });
+
+  if (restrictClientConditions && form.loyalty.value !== "retail") {
+    form.loyalty.value = "retail";
+    clientConditionId = "retail";
+    tierDiscountOverride = null;
+    activeTierKey = "";
+  }
+}
+
 function syncPricingConditionField() {
   const clientType = form.clientType.value || "client";
   const label = ui.loyaltyField.querySelector(".field__label");
@@ -1151,7 +1228,7 @@ function syncPricingConditionField() {
       : fallback;
     dealerCategoryId = form.loyalty.value || fallback;
   } else {
-    if (label) label.textContent = "Условия клиента";
+    if (label) label.textContent = "Ценовые условия";
     clientConditionOptions.forEach((option) => {
       form.loyalty.append(new Option(option.label, option.value));
     });
@@ -1165,6 +1242,7 @@ function syncPricingConditionField() {
   }
 
   pricingConditionType = clientType;
+  syncSmallOrderClientConditions();
 }
 
 function pricingTierKey(tier, clientType, loyalty) {
@@ -1225,9 +1303,9 @@ function effectivePricingTier(area) {
 }
 
 function selectionMarkupName(row) {
-  if (row.id === "length") return "Наценка за отбор по длине";
-  if (row.id === "visual") return "Наценка за дополнительный отбор";
-  return `Наценка: ${row.name}`;
+  if (row.id === "length") return "Увеличение стоимости за отбор по длине";
+  if (row.id === "visual") return "Увеличение стоимости за отбор по ширине, качеству, рисунку, цвету";
+  return `Увеличение стоимости за ${String(row.name || "").toLocaleLowerCase("ru")}`;
 }
 
 function effectiveMarkupRows(area) {
@@ -1239,7 +1317,7 @@ function effectiveMarkupRows(area) {
   if (smallAuto > 0) {
     definitions.push({
       id: "smallOrder",
-      name: "Наценка за малый объём",
+      name: "Увеличение стоимости за малый объём заказа",
       automaticPercent: Number(smallAuto)
     });
   }
@@ -1253,7 +1331,7 @@ function effectiveMarkupRows(area) {
   ) {
     definitions.push({
       id: "baseThickness",
-      name: "Изменение стоимости нижнего слоя",
+      name: "Увеличение стоимости за нестандартную толщину нижнего слоя",
       automaticPercent: Number(flooringData?.meta?.pricing?.customBaseThickness?.defaultMarkupPercent || 10)
     });
   }
@@ -1285,20 +1363,49 @@ function effectiveMarkupRows(area) {
   });
 }
 
+function volumeDiscountThresholdLabel(tier) {
+  const volumePercent = Number(tier?.volumePercent || 0);
+  const scale = flooringData?.meta?.pricing?.discountScale || [];
+  const row = scale.find((item) => Number(item?.percent || 0) === volumePercent && volumePercent > 0);
+  const minArea = Number(row?.minArea);
+  return Number.isFinite(minArea) ? Math.floor(minArea) : null;
+}
+
+function pricingConditionDiscountName(id) {
+  if (id === "loyalty") return "Скидка лояльности";
+  if (id === "regular") return "Скидка по карте постоянного покупателя";
+  if (id === "vip") return "Скидка по VIP-карте";
+  return "Скидка";
+}
+
+function pricingConditionInlineName(id) {
+  if (id === "loyalty") return "скидка лояльности";
+  if (id === "regular") return "карта постоянного покупателя";
+  if (id === "vip") return "VIP-карта";
+  return "ценовое условие";
+}
+
 function discountRowName(tier) {
   if (!tier) return "Скидка";
   if ((form.clientType.value || "client") === "dealer") {
-    return tier.name || "Дилерская категория";
+    if (tier.id === "dealer_3") return "Скидка по категории дилера №3";
+    if (tier.id === "dealer_2") return "Скидка по категории дилера №2";
+    if (tier.id === "dealer_1") return "Скидка по категории дилера №1";
+    return tier.name || "Скидка по категории дилера";
   }
 
-  if (tier.source === "volume") return "Скидка по объёму";
-  if (tier.source === "volumeAndLoyalty") return "Скидка по объёму / категории клиента";
+  const threshold = volumeDiscountThresholdLabel(tier);
+  if (tier.source === "volume") {
+    return threshold === null ? "Скидка по объёму" : `Скидка по объёму от ${threshold} м²`;
+  }
+  if (tier.source === "volumeAndLoyalty") {
+    const id = form.loyalty.value || "retail";
+    const volumePart = threshold === null ? "объём" : `объём от ${threshold} м²`;
+    return `Скидка: ${volumePart} или ${pricingConditionInlineName(id)}`;
+  }
   if (tier.source === "loyalty") {
     const id = form.loyalty.value || "retail";
-    if (id === "loyalty") return "Скидка лояльного клиента";
-    if (id === "regular") return "Скидка постоянного клиента";
-    if (id === "vip") return "Скидка VIP-клиента";
-    return tier.loyaltyName ? `Скидка: ${tier.loyaltyName}` : "Скидка клиента";
+    return pricingConditionDiscountName(id);
   }
   return tier.name || "Скидка";
 }
@@ -1418,6 +1525,8 @@ function updateAutomaticPricingAdjustments() {
   const basePrice = pricingBasePrice();
   const clientType = form.clientType.value || "client";
 
+  syncSmallOrderClientConditions(area);
+
   ui.loyaltyField.classList.remove("is-hidden");
   updateUnitPriceHint();
 
@@ -1507,7 +1616,7 @@ function validateNumber(
     input.value.trim();
 
   const showError =
-    shouldShowError(key);
+    shouldShowError(key, Boolean(rawValue));
 
   if (!rawValue) {
     setFieldError(
@@ -1561,7 +1670,7 @@ function pricingState() {
   const patternState = validateNonPriceFields();
 
   const areaValid = validateNumber(form.boardArea, "boardArea", 0.01, Infinity, "Количество доски без отходов", true);
-  const wasteValid = validateNumber(form.waste, "waste", 0, Infinity, "Процент отходов", true);
+  const wasteValid = validateNumber(form.waste, "waste", 0, Infinity, "Запас на укладку", true);
 
   let baseValid = true;
   if (customBaseEnabled) {
@@ -1584,8 +1693,8 @@ function pricingState() {
     priceBaseValid = Number.isFinite(custom) && custom > 0;
     setFieldError(
       "customPrice",
-      shouldShowError("customPrice") && !priceBaseValid
-        ? "Цена для расчёта: укажите значение больше 0."
+      shouldShowError("customPrice", Boolean(form.customPrice.value.trim())) && !priceBaseValid
+        ? "Укажите цену для расчёта."
         : ""
     );
   } else {
@@ -1678,10 +1787,16 @@ function renderSpecification() {
     ? Core.totalThickness(flooringData, item, baseThickness)
     : null;
 
-  ui.specBase.textContent = baseMaterialLabel(item?.baseMaterial || flooringData?.meta?.baseMaterial);
-  ui.specBaseThickness.textContent = baseThickness !== null
-    ? `${number.format(baseThickness)} мм`
+  const standardBaseThicknessMm = standardBaseThickness();
+  const nonstandardBaseThickness =
+    baseThickness !== null &&
+    Number.isFinite(standardBaseThicknessMm) &&
+    Math.abs(baseThickness - standardBaseThicknessMm) > 1e-9;
+
+  ui.specBase.textContent = baseThickness !== null
+    ? `${baseMaterialLabel(item?.baseMaterial || flooringData?.meta?.baseMaterial)} · ${number.format(baseThickness)} мм${nonstandardBaseThickness ? "*" : ""}`
     : "—";
+  ui.specBaseNote.classList.toggle("is-hidden", !nonstandardBaseThickness);
   const materialTypeId = item?.materialType || form.materialType.value;
   const speciesValue = form.species.value.trim();
   const multishpon = materialTypeId === "multishpon";
@@ -1708,8 +1823,9 @@ function renderSpecification() {
   ui.specThickness.textContent = totalThickness !== null ? `${number.format(totalThickness)} мм` : "—";
   ui.specConnection.textContent = connectionTypeForLength(form.length.value);
   ui.specSorting.textContent = "Селект+";
-  ui.specPatternType.textContent = form.materialType.value === "multishpon"
-    ? "Нет данных в справочнике"
+  const selectedPatternTypes = patternTypesForSelectedSpecies();
+  ui.specPatternType.textContent = speciesValue && !selectedPatternTypes.length
+    ? "Нет данных"
     : form.patternType.value || "—";
   ui.specPattern.textContent = pattern?.name || "—";
 
@@ -1735,7 +1851,9 @@ function renderSpecification() {
     ? `${number.format(calc.areaWithWaste)} м²`
     : priceArea() !== null ? `${number.format(priceArea())} м²` : "—";
 
-  ui.specComment.textContent = form.comment.value.trim() || "—";
+  const commentValue = form.comment.value.trim();
+  ui.specCommentRow.classList.toggle("is-hidden", !commentValue);
+  ui.specComment.textContent = commentValue || "—";
   ui.specFilesRow.classList.toggle("is-hidden", !files.length);
   ui.specFiles.textContent = files.length ? files.join(", ") : "—";
   ui.specUnderfloorHeating.textContent = Core.underfloorHeatingLabel(form.topLayer.value);
@@ -1757,7 +1875,7 @@ function validateMaterialFields() {
 
   const speciesError =
     !speciesMatch &&
-    shouldShowError("species")
+    shouldShowError("species", Boolean(form.species.value.trim()))
       ? form.species.value.trim()
         ? "Выберите точное наименование из справочника."
         : "Выберите наименование шпона."
@@ -1781,8 +1899,8 @@ function validateMaterialFields() {
   );
 
   const patternTypeRequired =
-    form.materialType.value === "natural" ||
-    form.materialType.value === "design";
+    Boolean(speciesMatch) &&
+    patternTypesForSelectedSpecies().length > 1;
 
   const patternTypeError =
     patternTypeRequired &&
@@ -1983,9 +2101,6 @@ function renderUploadedFiles(
     removeButton.setAttribute("aria-label", `Удалить файл ${file.name}`);
     removeButton.addEventListener("click", () => {
       removeUploadedFile(input, index);
-      if (input === form.customPatternFile) {
-        markFieldTouched("customPattern");
-      }
       renderUploadedFiles(input, output, emptyText, hideWhenEmpty);
       renderAll();
     });
@@ -2038,12 +2153,12 @@ function renderAll() {
       `${number.format(totalArea)} м²`;
 
     ui.areaWithWasteFormula.textContent =
-      `${number.format(area)} м² + ${number.format(waste)}% отходов`;
+      `${number.format(area)} м² + ${number.format(waste)}% запаса на укладку`;
   } else {
     ui.areaWithWasteValue.textContent = "—";
     ui.areaWithWasteFormula.textContent =
       selectedPattern()
-        ? "Заполните количество доски и процент отходов."
+        ? "Укажите количество доски."
         : "Сначала выберите раскладку.";
   }
 }
@@ -2134,7 +2249,8 @@ function requiredFieldIssues() {
   }
 
   if (
-    (form.materialType.value === "natural" || form.materialType.value === "design") &&
+    species &&
+    patternTypesForSelectedSpecies().length > 1 &&
     !form.patternType.value
   ) {
     issues.push({ key: "patternType", label: "тип рисунка", input: form.patternType });
@@ -2170,7 +2286,7 @@ function requiredFieldIssues() {
     issues.push({ key: "boardArea", label: "количество доски", input: form.boardArea });
   }
   if (!validNumberValue(form.waste, 0)) {
-    issues.push({ key: "waste", label: "процент отходов", input: form.waste });
+    issues.push({ key: "waste", label: "запас на укладку", input: form.waste });
   }
 
   if (!coating) {
@@ -2212,26 +2328,6 @@ function focusFirstIssue(issue) {
 function addToSpecification() {
   addAttempted = true;
 
-  [
-    "species",
-    "topLayer",
-    "patternType",
-    "sorting",
-    "pattern",
-    "angle",
-    "width",
-    "length",
-    "customPattern",
-    "boardArea",
-    "waste",
-    "coating",
-    "gloss",
-    "baseThickness",
-    "customPrice"
-  ].forEach((key) => {
-    touchedFields.add(key);
-  });
-
   renderAll();
 
   const issues =
@@ -2254,6 +2350,7 @@ function addToSpecification() {
   }
 
   addAttempted = false;
+  touchedFields.clear();
 
   let current = [];
 
@@ -2324,16 +2421,13 @@ async function init() {
     refreshSpeciesOptions();
     applyTopLayerSelection();
   });
-  form.patternType.addEventListener("change", () => {
-    markFieldTouched("patternType");
-    renderAll();
-  });
+  form.patternType.addEventListener("change", renderAll);
 
   form.baseThicknessToggle.addEventListener("click", () => {
     customBaseEnabled = !customBaseEnabled;
     ui.customBaseThicknessField.classList.toggle("is-hidden", !customBaseEnabled);
     form.baseThicknessToggle.setAttribute("aria-expanded", String(customBaseEnabled));
-    form.baseThicknessToggle.textContent = customBaseEnabled ? "Вернуть стандартную основу 12 мм" : "Указать другую толщину нижнего слоя";
+    form.baseThicknessToggle.textContent = customBaseEnabled ? "Вернуть стандартную толщину 12 мм" : "Указать другую толщину нижнего слоя";
     if (!customBaseEnabled) {
       form.baseThickness.value = "";
       markupOverrides.delete("baseThickness");
@@ -2368,11 +2462,20 @@ async function init() {
   });
 
   form.customPrice.addEventListener("input", () => {
+    const sanitized = sanitizeCustomPriceValue(form.customPrice.value);
+    if (form.customPrice.value !== sanitized) {
+      form.customPrice.value = sanitized;
+    }
     renderAll();
   });
   form.customPrice.addEventListener("blur", () => {
-    markFieldTouched("customPrice");
+    const raw = form.customPrice.value.trim();
     const value = parseCustomPrice();
+    if (raw && (!Number.isFinite(value) || value <= 0)) {
+      markFieldTouched("customPrice");
+    } else {
+      touchedFields.delete("customPrice");
+    }
     if (Number.isFinite(value) && value > 0) setCustomPriceValue(value);
     renderAll();
   });
@@ -2386,17 +2489,11 @@ async function init() {
 
   form.baseThickness.addEventListener("input", renderAll);
 
-  form.pattern.addEventListener("change", () => {
-    markFieldTouched("pattern");
-    applyPattern();
-  });
+  form.pattern.addEventListener("change", applyPattern);
   form.coating.addEventListener("change", applyCoating);
 
   bindFileInput(form.customPatternFile, ui.customPatternFileName, true);
-  form.customPatternFile.addEventListener("change", () => {
-    markFieldTouched("customPattern");
-    renderAll();
-  });
+  form.customPatternFile.addEventListener("change", renderAll);
   bindFileInput(form.files, ui.selectedFiles, true);
   ui.addToSpecButton.addEventListener("click", addToSpecification);
 
@@ -2415,27 +2512,15 @@ async function init() {
   });
 
   form.species.addEventListener("blur", () => {
-    markFieldTouched("species");
+    const hasValue = Boolean(form.species.value.trim());
+    if (hasValue && !exactSpeciesItem()) {
+      markFieldTouched("species");
+    } else {
+      touchedFields.delete("species");
+    }
     applySpeciesSelection();
   });
-  form.topLayer.addEventListener("blur", () => {
-    markFieldTouched("topLayer");
-    applyTopLayerSelection();
-  });
-  form.patternType.addEventListener("blur", () => {
-    if (!form.patternType.disabled) {
-      markFieldTouched("patternType");
-      renderAll();
-    }
-  });
-  form.angle.addEventListener("blur", () => {
-    markFieldTouched("angle");
-    renderAll();
-  });
-  form.customPattern.addEventListener("blur", () => {
-    markFieldTouched("customPattern");
-    renderAll();
-  });
+  form.topLayer.addEventListener("blur", applyTopLayerSelection);
 
   form.width.addEventListener("blur", () => {
     const pattern = selectedPattern();
@@ -2446,7 +2531,7 @@ async function init() {
     if (pattern) clampOnBlur(form.length, "length", pattern.limits.minLength, pattern.limits.maxLength, "Длина");
   });
   form.boardArea.addEventListener("blur", () => clampOnBlur(form.boardArea, "boardArea", 0.01, Infinity, "Метраж"));
-  form.waste.addEventListener("blur", () => clampOnBlur(form.waste, "waste", 0, Infinity, "Процент отходов"));
+  form.waste.addEventListener("blur", () => clampOnBlur(form.waste, "waste", 0, Infinity, "Запас на укладку"));
   form.baseThickness.addEventListener("blur", () => {
     if (customBaseEnabled) {
       clampOnBlur(

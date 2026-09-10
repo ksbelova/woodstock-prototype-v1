@@ -53,7 +53,7 @@
           <div class="field-grid field-grid--two">
             <label class="field" id="topLayerField">
               <span class="field__label">Верхний слой</span>
-              <select id="topLayerSelect">
+              <select id="topLayerSelect" disabled>
                 <option value="">Выберите верхний слой</option>
               </select>
               <span class="field__note" id="topLayerHint"></span>
@@ -75,25 +75,25 @@
             </label>
 
             <div class="field is-hidden" id="customPatternField">
-              <label class="field__label" for="customPatternInput">Описание индивидуальной раскладки</label>
-              <textarea id="customPatternInput" rows="4" placeholder="Опишите рисунок, направление, размеры элементов и другие требования"></textarea>
+              <label class="field__label" for="customPatternInput">Описание раскладки</label>
+              <textarea id="customPatternInput" rows="4" placeholder="Опишите желаемую раскладку и дополнительные требования"></textarea>
               <span class="field__error" id="customPatternError"></span>
 
               <div class="file-upload-box">
-                <label class="field__label" for="customPatternFileInput">Файл индивидуальной раскладки</label>
+                <label class="field__label" for="customPatternFileInput">Материалы к раскладке</label>
                 <input
                   id="customPatternFileInput"
                   type="file"
                   multiple
                   accept=".pdf,.dwg,.dxf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
                 />
-                <span class="field__note">Добавьте описание или приложите чертёж, схему либо техническое задание.</span>
+                <span class="field__note">План, схема раскладки или техническое задание.</span>
                 <div class="uploaded-files is-hidden" id="customPatternFileName">Файлы не выбраны</div>
               </div>
             </div>
 
             <p class="field-warning is-hidden" id="customPatternWarning">
-              Для ориентировочного расчёта используется запас 15%. Точное количество доски уточняется после проверки индивидуальной раскладки менеджером.
+              Индивидуальная раскладка требует дополнительной проверки перед подтверждением заказа.
             </p>
 
             <button
@@ -106,7 +106,7 @@
               Я знаю размеры досок
             </button>
 
-            <div class="field-grid field-grid--two is-hidden" id="boardSizeFields">
+            <div class="field-grid field-grid--two field-reveal-target is-hidden" id="boardSizeFields">
               <label class="field" id="boardWidthField">
                 <span class="field__label">Ширина, мм</span>
                 <input id="boardWidthInput" type="number" step="1" inputmode="numeric" />
@@ -121,7 +121,7 @@
             </div>
 
             <p class="field-warning is-hidden" id="boardWidthWarning">
-              При ширине свыше 130 мм наличие материала и возможность изготовления нужно подтвердить.
+              Для ширины более 130 мм наличие подходящего материала проверяется при подтверждении заказа.
             </p>
           </div>
 
@@ -134,19 +134,18 @@
               </label>
 
               <label class="field" id="wasteField">
-                <span class="field__label">Рекомендованный запас на укладку, %</span>
+                <span class="field__label">Запас на укладку, %</span>
                 <input id="wasteInput" type="number" readonly />
               </label>
             </div>
 
             <div class="area-summary" id="areaSummary" aria-live="polite">
-              <span class="area-summary__label">К расчёту</span>
+              <span class="area-summary__label">Итого к расчёту</span>
               <strong class="area-summary__value" id="areaWithWasteValue">—</strong>
               <span class="area-summary__formula" id="areaWithWasteFormula">Сначала выберите раскладку.</span>
             </div>
 
             <p class="field__note is-hidden" id="volumeDiscountHint">Для больших объёмов заказа предусмотрена скидка. Размер скидки можно уточнить у менеджера.</p>
-            <p class="field__note is-hidden" id="quickWasteHint"></p>
           </div>
         </section>
 
@@ -158,7 +157,7 @@
               <option value="">Выберите покрытие</option>
             </select>
             <span class="field__error" id="finishError"></span>
-            <p class="field__note is-hidden" id="finishHint">Стандартный блеск УФ-лака — 10%. Другой вариант можно согласовать с менеджером.</p>
+            <p class="field__note is-hidden" id="finishHint">Стандартная степень блеска — 10%. Другую степень блеска можно согласовать с менеджером.</p>
           </label>
         </section>
 
@@ -232,7 +231,7 @@
               multiple
               accept=".pdf,.dwg,.dxf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
             />
-            <span class="field__note">Можно приложить чертёж, план, визуализацию, техническое задание, таблицу или другой файл по проекту.</span>
+            <span class="field__note">Чертёж, план, визуализация, техническое задание, таблица или другой файл по проекту.</span>
             <div class="uploaded-files is-hidden" id="selectedFiles">Файлы не выбраны</div>
           </label>
 
@@ -248,7 +247,7 @@
             <span class="field__label">Согласие *</span>
             <span style="display:flex;align-items:flex-start;gap:10px;padding:14px;background:#fbfbfb;border:1px solid var(--line);border-radius:14px;cursor:pointer;">
               <input id="privacyInput" type="checkbox" style="width:auto;min-width:18px;min-height:18px;margin:1px 0 0;padding:0;" />
-              <span style="font-size:14px;line-height:1.45;">Согласен на обработку указанных персональных данных</span>
+              <span style="font-size:14px;line-height:1.45;">Согласен на обработку персональных данных</span>
             </span>
             <span class="field__error" id="privacyError"></span>
           </label>

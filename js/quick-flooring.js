@@ -35,7 +35,6 @@ const ui = Object.fromEntries([
   "customPatternField",
   "customPatternWarning",
   "customPatternFileName",
-  "quickWasteHint",
   "volumeDiscountHint",
   "finishHint",
   "boardSizeFields",
@@ -126,8 +125,8 @@ function round(value, digits = 2) {
   return Math.round((value + Number.EPSILON) * factor) / factor;
 }
 
-function shouldShowError(key) {
-  return submitAttempted || touchedFields.has(key);
+function shouldShowError(key, hasEnteredValue = false) {
+  return submitAttempted || (hasEnteredValue && touchedFields.has(key));
 }
 
 function markFieldTouched(key) {
@@ -241,21 +240,16 @@ function updateSpeciesClearButton() {
 
 function fillTopLayerOptions() {
   const currentValue = form.topLayer.value;
-  const selectedProducts = speciesProducts();
-  const sourceItems = selectedProducts.length ? selectedProducts : speciesItems();
-  const productLayers = [
-    ...new Set(
-      sourceItems
-        .map((item) => item.topLayer)
-        .filter(Boolean)
-    )
-  ];
-
-  const layers = productLayers.length
-    ? productLayers
-    : Object.keys(
-        flooringData?.meta?.thicknessByTopLayer || {}
-      );
+  const speciesMatch = exactSpeciesItem();
+  const layers = speciesMatch
+    ? [
+        ...new Set(
+          speciesProducts()
+            .map((item) => item.topLayer)
+            .filter(Boolean)
+        )
+      ]
+    : [];
 
   fillOptions(
     form.topLayer,
@@ -263,11 +257,11 @@ function fillTopLayerOptions() {
     "Выберите верхний слой"
   );
 
-  form.topLayer.disabled = false;
+  form.topLayer.disabled = !speciesMatch || !layers.length;
 
   if (layers.includes(currentValue)) {
     form.topLayer.value = currentValue;
-  } else if (currentValue) {
+  } else {
     form.topLayer.value = "";
   }
 }
@@ -358,11 +352,10 @@ function valueWithinLimits(value, min, max) {
 }
 
 function clampOnBlur(input, key, min, max, label) {
-  markFieldTouched(key);
-
   const raw = input.value.trim();
 
   if (!raw) {
+    touchedFields.delete(key);
     renderAll();
     return;
   }
@@ -370,6 +363,7 @@ function clampOnBlur(input, key, min, max, label) {
   const value = Number(raw);
 
   if (!Number.isFinite(value)) {
+    markFieldTouched(key);
     input.value = "";
     renderAll();
     setFieldError(key, `${label}: введите числовое значение.`);
@@ -380,6 +374,7 @@ function clampOnBlur(input, key, min, max, label) {
   const aboveMaximum = Number.isFinite(max) && value > max;
 
   if (belowMinimum || aboveMaximum) {
+    markFieldTouched(key);
     input.value = "";
     renderAll();
     setFieldError(
@@ -388,7 +383,11 @@ function clampOnBlur(input, key, min, max, label) {
         ? `${label}: допустимо от ${min} до ${max}.`
         : `${label}: значение не меньше ${min}.`
     );
+    return;
   }
+
+  touchedFields.delete(key);
+  setFieldError(key, "");
 }
 
 function validateBoardSizeFields() {
@@ -406,24 +405,20 @@ function validateBoardSizeFields() {
   const lengthRaw = form.boardLength.value.trim();
   const width = Number(widthRaw);
   const length = Number(lengthRaw);
-  const widthValid = valueWithinLimits(width, minWidth, maxWidth) && widthRaw !== "";
-  const lengthValid = valueWithinLimits(length, minLength, maxLength) && lengthRaw !== "";
+  const widthValid = !widthRaw || valueWithinLimits(width, minWidth, maxWidth);
+  const lengthValid = !lengthRaw || valueWithinLimits(length, minLength, maxLength);
 
   setFieldError(
     "boardWidth",
-    !widthValid && shouldShowError("boardWidth")
-      ? widthRaw
-        ? `Ширина: допустимо от ${minWidth} до ${maxWidth}.`
-        : "Ширина: заполните поле."
+    widthRaw && !widthValid && shouldShowError("boardWidth", true)
+      ? `Ширина: допустимо от ${minWidth} до ${maxWidth}.`
       : ""
   );
 
   setFieldError(
     "boardLength",
-    !lengthValid && shouldShowError("boardLength")
-      ? lengthRaw
-        ? `Длина: допустимо от ${minLength} до ${maxLength}.`
-        : "Длина: заполните поле."
+    lengthRaw && !lengthValid && shouldShowError("boardLength", true)
+      ? `Длина: допустимо от ${minLength} до ${maxLength}.`
       : ""
   );
 
@@ -490,10 +485,6 @@ function toggleBoardSizes() {
   renderAll();
 }
 
-function quickWasteHintText(pattern) {
-  return pattern?.wasteHint || "";
-}
-
 function applyPattern() {
   const pattern = selectedPattern();
   const quickCustomWaste = Number(flooringData?.meta?.quickCalculation?.customPatternWastePercent ?? 15);
@@ -504,10 +495,6 @@ function applyPattern() {
   const customPatternSelected = pattern?.id === "custom";
   ui.customPatternField.classList.toggle("is-hidden", !customPatternSelected);
   ui.customPatternWarning.classList.toggle("is-hidden", !customPatternSelected);
-
-  const wasteHintText = quickWasteHintText(pattern);
-  ui.quickWasteHint.textContent = wasteHintText;
-  ui.quickWasteHint.classList.toggle("is-hidden", !wasteHintText);
 
   if (!customPatternSelected) {
     form.customPattern.value = "";
@@ -599,7 +586,7 @@ function renderArea() {
   if (area !== null) {
     ui.areaWithWasteValue.textContent = `${number.format(area)} м²`;
     ui.areaWithWasteFormula.textContent =
-      `${number.format(roomArea)} м² + ${number.format(waste)}% запаса`;
+      `${number.format(roomArea)} м² + ${number.format(waste)}% запаса на укладку`;
     return;
   }
 
@@ -793,6 +780,49 @@ function validateEmail(value) {
   return !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function validateQuickFieldOnBlur(key) {
+  if (submitAttempted) {
+    validateAll();
+    return;
+  }
+
+  if (key === "species") {
+    const hasValue = Boolean(form.species.value.trim());
+    const invalid = hasValue && !exactSpeciesExists();
+    if (invalid) markFieldTouched(key);
+    else touchedFields.delete(key);
+    setFieldError(key, invalid ? "Выберите наименование шпона из списка." : "");
+    return;
+  }
+
+  if (key === "roomArea") {
+    const raw = form.roomArea.value.trim();
+    const value = Number(raw);
+    const invalid = Boolean(raw) && (!Number.isFinite(value) || value <= 0);
+    if (invalid) markFieldTouched(key);
+    else touchedFields.delete(key);
+    setFieldError(key, invalid ? "Укажите площадь помещения больше 0." : "");
+    return;
+  }
+
+  if (key === "phone") {
+    const raw = form.phone.value.trim();
+    const invalid = Boolean(raw) && !validPhone(raw);
+    if (invalid) markFieldTouched(key);
+    else touchedFields.delete(key);
+    setFieldError(key, invalid ? "Проверьте номер телефона." : "");
+    return;
+  }
+
+  if (key === "email") {
+    const raw = normalizeEmail(form.email.value);
+    const invalid = Boolean(raw) && !validateEmail(raw);
+    if (invalid) markFieldTouched(key);
+    else touchedFields.delete(key);
+    setFieldError(key, invalid ? "Проверьте адрес электронной почты." : "");
+  }
+}
+
 function validateAll() {
   const issues = [];
   const roomArea = Number(form.roomArea.value);
@@ -805,24 +835,20 @@ function validateAll() {
   const customPatternMessage = pattern?.requiresDescription && !hasCustomPatternDetails
     ? "Добавьте описание раскладки или приложите файл."
     : "";
-  const widthMessage = sizesOpen
-    ? (!form.boardWidth.value
-      ? "Ширина: заполните поле."
-      : valueWithinLimits(width, limits.minWidth, limits.maxWidth)
-        ? ""
-        : `Ширина: допустимо от ${limits.minWidth} до ${limits.maxWidth}.`)
+  const widthMessage = sizesOpen && form.boardWidth.value
+    ? (valueWithinLimits(width, limits.minWidth, limits.maxWidth)
+      ? ""
+      : `Ширина: допустимо от ${limits.minWidth} до ${limits.maxWidth}.`)
     : "";
-  const lengthMessage = sizesOpen
-    ? (!form.boardLength.value
-      ? "Длина: заполните поле."
-      : valueWithinLimits(length, limits.minLength, limits.maxLength)
-        ? ""
-        : `Длина: допустимо от ${limits.minLength} до ${limits.maxLength}.`)
+  const lengthMessage = sizesOpen && form.boardLength.value
+    ? (valueWithinLimits(length, limits.minLength, limits.maxLength)
+      ? ""
+      : `Длина: допустимо от ${limits.minLength} до ${limits.maxLength}.`)
     : "";
 
   const checks = [
     ["species", exactSpeciesExists() ? "" : "Выберите наименование шпона из списка.", form.species],
-    ["topLayer", currentItem ? "" : "Выберите верхний слой.", form.topLayer],
+    ["topLayer", exactSpeciesExists() && !currentItem ? "Выберите верхний слой." : "", form.topLayer],
     ["pattern", form.pattern.value ? "" : "Выберите раскладку.", form.pattern],
     ["customPattern", customPatternMessage, form.customPattern],
     ["boardWidth", widthMessage, form.boardWidth],
@@ -832,7 +858,7 @@ function validateAll() {
     ["phone", validPhone(form.phone.value) ? "" : "Проверьте номер телефона.", form.phone],
     ["city", form.city.value.trim() ? "" : "Укажите город.", form.city],
     ["email", validateEmail(normalizeEmail(form.email.value)) ? "" : "Проверьте адрес электронной почты.", form.email],
-    ["privacy", form.privacy.checked ? "" : "Необходимо согласие на обработку данных.", form.privacy]
+    ["privacy", form.privacy.checked ? "" : "Необходимо согласие на обработку персональных данных.", form.privacy]
   ];
 
   checks.forEach(([key, message, input]) => {
@@ -919,7 +945,6 @@ function renderUploadedFiles(input, container) {
     removeButton.setAttribute("aria-label", `Удалить файл ${file.name}`);
     removeButton.addEventListener("click", () => {
       removeUploadedFile(input, index);
-      if (input === form.customPatternFile) markFieldTouched("customPattern");
       renderUploadedFiles(input, container);
       renderAll();
     });
@@ -941,7 +966,6 @@ function renderFiles() {
 
 function renderCustomPatternFiles() {
   addSelectedFiles(form.customPatternFile, ui.customPatternFileName);
-  markFieldTouched("customPattern");
   renderAll();
 }
 
@@ -1020,7 +1044,7 @@ function pdfTableLayout() {
   };
 }
 
-const PDF_TABLE_OUTER_WIDTH = 555;
+const PDF_TABLE_OUTER_WIDTH = 539;
 
 function fitPdfTableWidths(baseWidths, horizontalPadding, verticalLineWidth = 0.7) {
   const columnCount = baseWidths.length;
@@ -1063,7 +1087,7 @@ function connectionTypeForLength(value, fallback = "Определяется п�
   const length = Number(value);
 
   if (!Number.isFinite(length) || length <= 0) return fallback;
-  if (length >= 600 && length <= 2400) return "Шип-паз";
+  if (length >= 400 && length <= 2400) return "Шип-паз";
   if (length >= 2401 && length <= 3000) return "Паз-паз на шпонку";
 
   return fallback;
@@ -1114,6 +1138,11 @@ function compoundPdfCell(mainValue, details = []) {
 
 function createPdfDocument(payload) {
   const baseThickness = Number(payload.material.baseThicknessMm);
+  const standardBaseThickness = Number(flooringData?.meta?.baseThicknessMm || 12);
+  const nonstandardBaseThickness =
+    Number.isFinite(baseThickness) &&
+    Number.isFinite(standardBaseThickness) &&
+    Math.abs(baseThickness - standardBaseThickness) > 1e-9;
   const overallThickness = Number(payload.material.totalThicknessMm);
   const pricePerM2 = payload.pricing.finalPricePerM2 ? money.format(payload.pricing.finalPricePerM2) : "По запросу";
   const total = payload.pricing.total ? money.format(payload.pricing.total) : "По запросу";
@@ -1152,87 +1181,123 @@ function createPdfDocument(payload) {
         { text: "Email", color: "#666663" },
         { text: pdfValue(payload.contact.email), bold: true, margin: [0, 4, 0, 0] }
       ]
-    },
-    {
-      stack: [
-        { text: "Комментарий", color: "#666663" },
-        { text: pdfValue(payload.contact.comment), bold: true, margin: [0, 4, 0, 0] }
-      ]
-    },
-    {
-      stack: [
-        { text: "Приложенные файлы", color: "#666663" },
-        { text: pdfValue(clientFiles), bold: true, margin: [0, 4, 0, 0] }
-      ]
     }
   ]];
 
   const multishpon = payload.material.typeId === "multishpon";
   const multishponParts = Core.splitMultishponName(flooringData, payload.material.species);
-  const veneerHeaderLabels = multishpon
-    ? ["Коллекция", "Наименование"]
-    : [payload.material.typeId === "design" ? "Порода дерева и оттенок" : "Порода дерева"];
-  const veneerCells = multishpon
+  const veneerDetails = multishpon
     ? [
-        compoundPdfCell(multishponParts.collection),
-        compoundPdfCell(multishponParts.name, [
-          { label: "Тип шпона", value: payload.material.typeName },
-          { label: "Страна происхождения шпона", value: "—" },
-          { label: "Тип рисунка", value: payload.material.patternType }
-        ])
+        { label: "Коллекция", value: multishponParts.collection },
+        { label: "Наименование", value: multishponParts.name },
+        { label: "Тип шпона", value: payload.material.typeName },
+        { label: "Страна происхождения шпона", value: "—" },
+        { label: "Тип рисунка", value: pdfValue(payload.material.patternType, "Нет данных") },
+        { label: "Сортировка", value: "Селект+" }
       ]
     : [
-        compoundPdfCell(payload.material.species, [
-          { label: "Тип шпона", value: payload.material.typeName },
-          { label: "Страна происхождения шпона", value: "—" },
-          { label: "Тип рисунка", value: payload.material.patternType }
-        ])
+        {
+          label: payload.material.typeId === "design" ? "Порода дерева и оттенок" : "Порода дерева",
+          value: payload.material.species
+        },
+        { label: "Тип шпона", value: payload.material.typeName },
+        { label: "Страна происхождения шпона", value: "—" },
+        { label: "Тип рисунка", value: pdfValue(payload.material.patternType, "Нет данных") },
+        { label: "Сортировка", value: "Селект+" }
       ];
+
+  const groupedPdfCell = (details = []) => {
+    const visibleDetails = details.filter((item) => {
+      const value = String(item?.value ?? "").trim();
+      return value && (value !== "—" || item?.label === "Страна происхождения шпона");
+    });
+
+    if (!visibleDetails.length) return { text: "—", bold: true, fontSize: 5.3 };
+
+    return {
+      stack: visibleDetails.map((item) => ({
+        text: [
+          { text: `${item.label}: `, color: "#6B6B68" },
+          { text: String(item.value), color: "#202020" }
+        ],
+        fontSize: 4.3,
+        lineHeight: 1.03,
+        margin: [0, 0, 0, 1]
+      }))
+    };
+  };
 
   const productHeader = [
     "№ П/П",
     "Нижний слой",
-    "Толщина нижнего слоя",
     "Верхний слой",
     "Толщина",
-    ...veneerHeaderLabels,
+    "Шпон",
     "Ширина",
     "Длина",
     "Тип соединения",
-    "Итого к расчёту — количество м²",
     "Раскладка",
-    "Покрытие"
+    "Итого к расчёту",
+    "Финишное покрытие",
+    "Подходит для тёплого пола",
+    "Конструкция",
+    "Примечание"
   ].map((text) => ({ text, style: "tableHeader", alignment: "center" }));
+
+  const baseLayerText = Number.isFinite(baseThickness)
+    ? `${pdfBaseMaterial(payload.material.baseMaterial || flooringData?.meta?.baseMaterial || "Влагостойкая фанера из берёзы")} · ${number.format(baseThickness)} мм${nonstandardBaseThickness ? "*" : ""}`
+    : pdfBaseMaterial(payload.material.baseMaterial || flooringData?.meta?.baseMaterial || "Влагостойкая фанера из берёзы");
+  const baseLayerCell = {
+    stack: [
+      { text: baseLayerText, bold: true, fontSize: 5.3, lineHeight: 1.03 },
+      ...(nonstandardBaseThickness
+        ? [{ text: "* Нестандартная толщина", color: "#6B6B68", fontSize: 4.5, lineHeight: 1.03, margin: [0, 2, 0, 0] }]
+        : [])
+    ]
+  };
 
   const productRow = [
     { text: "1", bold: true, alignment: "center", fontSize: 5.2 },
-    compoundPdfCell(pdfBaseMaterial(payload.material.baseMaterial || flooringData?.meta?.baseMaterial || "Влагостойкая фанера из берёзы")),
-    compoundPdfCell(Number.isFinite(baseThickness) ? `${number.format(baseThickness)} мм` : "—"),
+    baseLayerCell,
     compoundPdfCell(payload.material.topLayer),
     compoundPdfCell(Number.isFinite(overallThickness) ? `${number.format(overallThickness)} мм` : "—"),
-    ...veneerCells,
+    groupedPdfCell(veneerDetails),
     compoundPdfCell(payload.layout.boardWidth ? `${number.format(payload.layout.boardWidth)} мм` : "—"),
     compoundPdfCell(payload.layout.boardLength ? `${number.format(payload.layout.boardLength)} мм` : "—"),
     compoundPdfCell(connectionType),
-    compoundPdfCell(`${number.format(payload.layout.areaWithWaste)} м²`, [
-      { label: "Площадь помещения", value: `${number.format(payload.layout.roomArea)} м²` },
-      { label: "Процент отходов", value: `${number.format(payload.layout.wastePercent)}%` }
-    ]),
     compoundPdfCell(payload.layout.name, [
       { label: "Угол торцевого реза", value: angle },
-      { label: "Описание индивидуальной раскладки", value: layoutDescription },
+      { label: "Описание раскладки", value: layoutDescription },
       { label: "Файлы индивидуальной раскладки", value: layoutFiles }
     ]),
-    compoundPdfCell(pdfFinishLabel(payload.finish))
+    compoundPdfCell(`${number.format(payload.layout.areaWithWaste)} м²`, [
+      { label: "Количество без учёта отходов", value: `${number.format(payload.layout.roomArea)} м²` },
+      { label: "Запас на укладку", value: `${number.format(payload.layout.wastePercent)}%` }
+    ]),
+    compoundPdfCell(
+      String(payload.finish?.name || "—").replace(/,\s*блеск\s+\d+(?:[.,]\d+)?%\s*$/i, ""),
+      [
+        {
+          label: "Степень блеска",
+          value: payload.finish?.gloss === null || payload.finish?.gloss === undefined
+            ? ""
+            : `${number.format(payload.finish.gloss)}%`
+        }
+      ]
+    ),
+    compoundPdfCell(underfloorHeating),
+    compoundPdfCell("Запатентованная ламель WOODSTOCK"),
+    groupedPdfCell([
+      { label: "Комментарий", value: payload.contact.comment },
+      { label: "Приложенные файлы", value: clientFiles }
+    ])
   ];
-  const productBaseWidths = multishpon
-    ? [15, 41, 32, 35, 36, 38, 45, 32, 35, 55, 62, 72, 65]
-    : [15, 41, 32, 35, 36, 75, 32, 35, 55, 62, 72, 65];
+  const productBaseWidths = [14, 52, 32, 32, 78, 27, 29, 50, 62, 62, 55, 42, 58, 68];
 
   return {
     pageSize: "A4",
     pageOrientation: "portrait",
-    pageMargins: [20, 18, 20, 24],
+    pageMargins: [28, 18, 28, 24],
     defaultStyle: {
       font: "Roboto",
       fontSize: 6.2,
@@ -1241,16 +1306,18 @@ function createPdfDocument(payload) {
     styles: {
       logo: { fontSize: 11.5, bold: true, characterSpacing: 1.2 },
       requisites: { fontSize: 5.2, color: "#555552", lineHeight: 1.05 },
-      documentType: { fontSize: 12.5, bold: true, alignment: "center", margin: [0, 4, 0, 1] },
-      documentSubtitle: { fontSize: 7.2, alignment: "center", color: "#5D5D5A", margin: [0, 0, 0, 5] },
+      documentType: { fontSize: 12.5, bold: true, alignment: "center", margin: [0, 18, 0, 5] },
+      documentSubtitle: { fontSize: 7.2, alignment: "center", color: "#5D5D5A", margin: [0, 0, 0, 16] },
       meta: { fontSize: 5.6, color: "#555552" },
       sectionTitle: { fontSize: 8, bold: true, margin: [0, 6, 0, 3] },
       tableHeader: { fontSize: 4.4, bold: true, color: "#202020" },
       priceLabel: { fontSize: 5.7, color: "#666663" },
       priceValue: { fontSize: 8.2, bold: true },
       totalValue: { fontSize: 11.5, bold: true },
+      vatLabel: { fontSize: 4.8, color: "#777774" },
+      vatValue: { fontSize: 6.2, color: "#555552" },
       disclaimer: { fontSize: 5.3, color: "#5F5F5C", lineHeight: 1.08 },
-      infoTitle: { fontSize: 8.2, bold: true, margin: [0, 7, 0, 4] },
+      infoTitle: { fontSize: 8.2, bold: true, margin: [0, 14, 0, 4] },
       infoText: { fontSize: 5.4, lineHeight: 1.08, color: "#202020" },
       infoSmall: { fontSize: 5.2, lineHeight: 1.06, color: "#353533" },
       infoLead: { fontSize: 5.8, bold: true, lineHeight: 1.08 }
@@ -1261,7 +1328,7 @@ function createPdfDocument(payload) {
           { text: "WOODSTOCK · Предварительная спецификация", alignment: "left" },
           { text: `${currentPage} / ${pageCount}`, alignment: "right" }
         ],
-        margin: [20, 5, 20, 0],
+        margin: [28, 5, 28, 0],
         fontSize: 5,
         color: "#777774"
       };
@@ -1300,94 +1367,72 @@ function createPdfDocument(payload) {
       { text: "Клиент", style: "sectionTitle" },
       {
         table: {
-          widths: fitPdfTableWidths([70, 74, 51, 80, 128, 109], 3),
+          widths: fitPdfTableWidths([105, 125, 100, 160], 3),
           body: clientBody
         },
-        layout: pdfTableLayout()
+        layout: pdfTableLayout(),
+        margin: [0, 0, 0, 10]
       },
-      { text: "Изделие", style: "sectionTitle" },
+      { text: "Инженерная доска", style: "sectionTitle" },
       {
         table: {
           headerRows: 1,
-          widths: fitPdfTableWidths(productBaseWidths, 2.2),
+          widths: fitPdfTableWidths(productBaseWidths, 1.4),
           body: [productHeader, productRow],
           dontBreakRows: true
         },
         layout: {
           ...pdfTableLayout(),
-          paddingLeft: () => 2.2,
-          paddingRight: () => 2.2,
+          paddingLeft: () => 1.4,
+          paddingRight: () => 1.4,
           fillColor(rowIndex) {
             return rowIndex === 0 ? "#F0F0ED" : null;
           }
-        }
+        },
+        margin: [0, 0, 0, includeSplineNote ? 0 : 10]
       },
       ...(includeSplineNote ? [{
         text: "Шпонка поставляется в комплекте.",
         style: "infoSmall",
-        margin: [0, 3, 0, 0]
+        margin: [0, 3, 0, 10]
       }] : []),
+      { text: "Ориентировочная стоимость", style: "sectionTitle", alignment: "right" },
       {
         stack: [
+          { text: "Расчётная цена за м² с НДС", style: "priceLabel", alignment: "right" },
+          { text: pricePerM2, style: "priceValue", alignment: "right", margin: [0, 4, 0, 5] },
           {
-            text: [
-              { text: "Сортировка Селект+. ", bold: true },
-              "Заказчику предоставляем возможность выбрать пачки шпона, текстуру и цвет, которые будут на напольном покрытии."
-            ]
+            canvas: [{
+              type: "line",
+              x1: 0,
+              y1: 0,
+              x2: 105,
+              y2: 0,
+              lineWidth: 0.6,
+              lineColor: "#CFCFCB"
+            }],
+            alignment: "right",
+            margin: [0, 0, 0, 6]
           },
+          { text: "Итого с НДС", style: "priceLabel", alignment: "right" },
+          { text: total, style: "totalValue", alignment: "right", margin: [0, 3, 0, 5] },
           {
-            text: [
-              { text: "Подходит для тёплого пола — ", bold: true },
-              underfloorHeating
-            ],
-            margin: [0, 3, 0, 0]
+            canvas: [{
+              type: "line",
+              x1: 0,
+              y1: 0,
+              x2: 105,
+              y2: 0,
+              lineWidth: 0.6,
+              lineColor: "#CFCFCB"
+            }],
+            alignment: "right",
+            margin: [0, 0, 0, 4]
           },
-          {
-            text: [
-              { text: "Конструкция — ", bold: true },
-              "Запатентованная ламель WOODSTOCK"
-            ],
-            margin: [0, 3, 0, 0]
-          }
+          { text: "В том числе НДС 22%", style: "vatLabel", alignment: "right" },
+          { text: vat, style: "vatValue", alignment: "right", margin: [0, 2, 0, 0] }
         ],
-        style: "infoSmall",
-        margin: [0, 4, 0, 0]
-      },
-      { text: "Ориентировочная стоимость", style: "sectionTitle" },
-      {
-        table: {
-          widths: fitPdfTableWidths([251, 123, 138], 6),
-          body: [[
-            {
-              stack: [
-                { text: "Расчётная цена за м² с НДС", style: "priceLabel" },
-                { text: pricePerM2, style: "priceValue", margin: [0, 4, 0, 0] }
-              ]
-            },
-            {
-              stack: [
-                { text: "Итого с НДС", style: "priceLabel", alignment: "right" },
-                { text: total, style: "totalValue", alignment: "right", margin: [0, 3, 0, 0] }
-              ]
-            },
-            {
-              stack: [
-                { text: "В том числе НДС 22%", style: "priceLabel", alignment: "right" },
-                { text: vat, style: "priceValue", alignment: "right", margin: [0, 4, 0, 0] }
-              ]
-            }
-          ]]
-        },
-        layout: {
-          hLineColor: "#CFCFCB",
-          vLineColor: "#CFCFCB",
-          hLineWidth: () => 0.7,
-          vLineWidth: () => 0.7,
-          paddingLeft: () => 6,
-          paddingRight: () => 6,
-          paddingTop: () => 6,
-          paddingBottom: () => 6
-        }
+        margin: [0, 2, 0, 4]
       },
       {
         text: "Расчёт является предварительным и не является публичной офертой.",
@@ -1548,9 +1593,9 @@ function renderAll() {
   renderResult();
   if (ui.finishHint) {
     const finishHintText = form.finish.value === "uv_lacquer"
-      ? "Стандартный блеск УФ-лака — 10%. Другой вариант можно согласовать с менеджером."
+      ? "Стандартная степень блеска — 10%. Другую степень блеска можно согласовать с менеджером."
       : form.finish.value === "parquet_lacquer"
-        ? "Стандартный блеск Паркетного лака — 10%. Другой вариант можно согласовать с менеджером."
+        ? "Стандартная степень блеска — 10%. Другую степень блеска можно согласовать с менеджером."
         : "";
     ui.finishHint.textContent = finishHintText;
     ui.finishHint.classList.toggle("is-hidden", !finishHintText);
@@ -1613,15 +1658,27 @@ async function init() {
     if (document.activeElement === form.species) renderSpeciesSuggestions();
     applyTopLayerSelection();
   });
-  form.pattern.addEventListener("change", applyPattern);
-  form.customPattern.addEventListener("input", () => {
-    markFieldTouched("customPattern");
-    renderAll();
+  form.species.addEventListener("blur", () => {
+    window.setTimeout(() => validateQuickFieldOnBlur("species"), 0);
   });
+  form.pattern.addEventListener("change", applyPattern);
+  form.customPattern.addEventListener("input", renderAll);
   form.customPatternFile.addEventListener("change", renderCustomPatternFiles);
   form.boardSizeToggle.addEventListener("click", toggleBoardSizes);
-  form.boardWidth.addEventListener("input", renderAll);
-  form.boardLength.addEventListener("input", renderAll);
+  form.boardWidth.addEventListener("input", () => {
+    if (!submitAttempted) {
+      touchedFields.delete("boardWidth");
+      setFieldError("boardWidth", "");
+    }
+    renderAll();
+  });
+  form.boardLength.addEventListener("input", () => {
+    if (!submitAttempted) {
+      touchedFields.delete("boardLength");
+      setFieldError("boardLength", "");
+    }
+    renderAll();
+  });
 
   form.boardWidth.addEventListener("blur", () => {
     const limits = selectedPattern()?.limits;
@@ -1651,6 +1708,7 @@ async function init() {
     }
   });
   form.roomArea.addEventListener("input", renderAll);
+  form.roomArea.addEventListener("blur", () => validateQuickFieldOnBlur("roomArea"));
   form.finish.addEventListener("change", renderAll);
   form.files.addEventListener("change", renderFiles);
   form.city.addEventListener("focus", renderCitySuggestions);
@@ -1665,9 +1723,15 @@ async function init() {
     if (cityField && !cityField.contains(event.target)) closeCitySuggestions();
   });
   form.phone.addEventListener("input", applyPhoneMask);
-  form.phone.addEventListener("blur", applyPhoneMask);
+  form.phone.addEventListener("blur", () => {
+    applyPhoneMask();
+    validateQuickFieldOnBlur("phone");
+  });
   form.email.addEventListener("input", applyEmailMask);
-  form.email.addEventListener("blur", applyEmailMask);
+  form.email.addEventListener("blur", () => {
+    applyEmailMask();
+    validateQuickFieldOnBlur("email");
+  });
   ui.getCalculationButton.addEventListener("click", submitCalculation);
   ui.downloadModalClose?.addEventListener("click", closeDownloadModal);
   ui.downloadModal?.addEventListener("click", (event) => {
