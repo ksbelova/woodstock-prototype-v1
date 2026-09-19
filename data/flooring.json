@@ -1828,8 +1828,7 @@
       "materialTypeName": "Дизайн-шпон",
       "species": "Дуб 13.007",
       "patternTypes": [
-        "Радиальный",
-        "Тангенциальный"
+        "Радиальный"
       ]
     },
     {
@@ -1837,7 +1836,6 @@
       "materialTypeName": "Дизайн-шпон",
       "species": "Дуб 13.009",
       "patternTypes": [
-        "Радиальный",
         "Тангенциальный"
       ]
     },
@@ -50157,7 +50155,7 @@
         "minWidth": 60,
         "maxWidth": 240,
         "minLength": 600,
-        "maxLength": 2400
+        "maxLength": 3000
       },
       "defaultWastePercent": 5
     },
@@ -50223,7 +50221,7 @@
   "coatings": [
     {
       "id": "oil",
-      "name": "Твёрдое воск-масло",
+      "name": "3 слоя твёрдого воск-масла, матовое",
       "description": "",
       "glossRequired": false,
       "affectsPrice": false
@@ -50234,16 +50232,18 @@
       "description": "",
       "glossRequired": true,
       "minGloss": 5,
-      "maxGloss": 40,
+      "maxGloss": 60,
+      "confirmationGlossMin": 30,
       "affectsPrice": false,
-      "defaultGloss": 10,
+      "defaultGloss": 5,
       "glossOptions": [
         5,
         10,
-        15,
         20,
         30,
-        40
+        40,
+        50,
+        60
       ]
     },
     {
@@ -50252,14 +50252,16 @@
       "description": "",
       "glossRequired": true,
       "minGloss": 5,
-      "maxGloss": 40,
+      "maxGloss": 60,
+      "confirmationGlossMin": 30,
       "glossOptions": [
         5,
         10,
-        15,
         20,
         30,
-        40
+        40,
+        50,
+        60
       ],
       "affectsPrice": false,
       "defaultGloss": 10

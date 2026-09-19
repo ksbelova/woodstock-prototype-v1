@@ -59,7 +59,7 @@
               <span class="field__error" id="topLayerError"></span>
             </label>
 
-            <label class="field" id="patternTypeField">
+            <label class="field is-hidden" id="patternTypeField">
               <span class="field__label">Тип рисунка</span>
               <select id="patternTypeSelect" disabled>
                 <option value="">Выберите тип рисунка</option>
@@ -171,9 +171,9 @@
 
             <div class="field-grid field-grid--two">
               <label class="field" id="boardAreaField">
-                <span class="field__label">Необходимое количество доски без отходов, м²</span>
+                <span class="field__label">Площадь помещения, м²</span>
                 <input id="boardAreaInput" type="number" min="0.01" step="0.01" inputmode="decimal" />
-                <span class="field__note"></span>
+                <span class="field__note">Площадь пола, на которую планируется укладка инженерной доски</span>
                 <span class="field__error" id="boardAreaError"></span>
               </label>
 
@@ -183,6 +183,7 @@
                   id="wasteInput"
                   type="number"
                   min="0"
+                  max="30"
                   step="0.1"
                   inputmode="decimal"
                   placeholder="Сначала выберите раскладку"
@@ -195,7 +196,7 @@
             <div class="area-summary" id="areaSummary" aria-live="polite">
               <span class="area-summary__label">Итого к расчёту</span>
               <strong class="area-summary__value" id="areaWithWasteValue">—</strong>
-              <span class="area-summary__formula" id="areaWithWasteFormula">Укажите количество доски.</span>
+              <span class="area-summary__formula" id="areaWithWasteFormula">Укажите площадь помещения.</span>
             </div>
           </div>
         </section>
@@ -222,13 +223,17 @@
           <h2>Цена</h2>
 
           <div class="field-grid field-grid--two">
-            <label class="field" id="clientTypeField">
-              <span class="field__label">Тип покупателя</span>
-              <select id="clientTypeSelect">
-                <option value="client">Клиент</option>
-                <option value="dealer">Дилер</option>
-              </select>
-            </label>
+            <!--
+              Расширенные права (временно отключено до личного кабинета / ролевой модели):
+              <label class="field" id="clientTypeField">
+                <span class="field__label">Тип покупателя</span>
+                <select id="clientTypeSelect">
+                  <option value="client">Клиент</option>
+                  <option value="dealer">Дилер</option>
+                </select>
+              </label>
+            -->
+            <input id="clientTypeSelect" type="hidden" value="client" />
 
             <label class="field" id="loyaltyField">
               <span class="field__label">Ценовые условия</span>
@@ -244,15 +249,22 @@
           <div class="price-reference">
             <span>Розничная цена</span>
             <strong id="retailPriceValue">—</strong>
-            <button class="field-action is-hidden" id="customPriceToggle" type="button" aria-expanded="false" aria-controls="customPriceField">Изменить цену для расчёта</button>
+            <!--
+              Расширенные права (временно отключено до личного кабинета / ролевой модели):
+              <button class="field-action is-hidden" id="customPriceToggle" type="button" aria-expanded="false" aria-controls="customPriceField">Изменить цену для расчёта</button>
+            -->
           </div>
 
-          <label class="field is-hidden" id="customPriceField">
-            <span class="field__label" for="customPriceInput">Цена для расчёта, ₽/м²</span>
-            <input id="customPriceInput" type="text" inputmode="decimal" autocomplete="off" />
-            <button class="field-action" id="resetCustomPriceButton" type="button">Вернуть розничную цену</button>
-            <span class="field__error" id="customPriceError"></span>
-          </label>
+          <!--
+            Расширенные права (временно отключено до личного кабинета / ролевой модели):
+            <label class="field is-hidden" id="customPriceField">
+              <span class="field__label" for="customPriceInput">Цена для расчёта, ₽/м²</span>
+              <input id="customPriceInput" type="text" inputmode="decimal" autocomplete="off" />
+              <button class="field-action" id="resetCustomPriceButton" type="button">Вернуть розничную цену</button>
+              <span class="field__error" id="customPriceError"></span>
+            </label>
+          -->
+          <input id="customPriceInput" type="hidden" value="" />
 
           <section class="is-hidden" id="priceAdjustmentsBlock">
             <h3 class="subheading">Условия, влияющие на цену</h3>
@@ -303,13 +315,14 @@
                 <div><dt>Шпон</dt><dd></dd></div>
                 <div id="specSpeciesRow" class="spec-list__nested"><dt id="specSpeciesLabel">Наименование шпона</dt><dd id="specSpecies">—</dd></div>
                 <div id="specSpeciesNameRow" class="spec-list__nested is-hidden"><dt>Наименование</dt><dd id="specSpeciesName">—</dd></div>
-                <div class="spec-list__nested"><dt>Тип шпона</dt><dd id="specMaterialType">—</dd></div>
+                <div id="specMaterialTypeRow" class="spec-list__nested"><dt>Тип шпона</dt><dd id="specMaterialType">—</dd></div>
                 <div class="spec-list__nested"><dt>Страна происхождения шпона</dt><dd>—</dd></div>
-                <div class="spec-list__nested"><dt>Тип рисунка</dt><dd id="specPatternType">—</dd></div>
+                <div id="specPatternTypeRow" class="spec-list__nested is-hidden"><dt>Тип рисунка</dt><dd id="specPatternType">—</dd></div>
                 <div class="spec-list__nested"><dt>Сортировка</dt><dd id="specSorting">—</dd></div>
 
                 <div><dt>Ширина</dt><dd id="specWidth">—</dd></div>
                 <div><dt>Длина</dt><dd id="specLength">—</dd></div>
+                <div><dt>Наличие фаски</dt><dd id="specChamfer">—</dd></div>
                 <div><dt>Тип соединения</dt><dd id="specConnection">—</dd></div>
 
                 <div><dt>Раскладка</dt><dd id="specPattern">—</dd></div>
@@ -318,13 +331,13 @@
                 <div id="specCustomPatternFileRow" class="spec-list__nested is-hidden"><dt>Файлы индивидуальной раскладки</dt><dd id="specCustomPatternFile">—</dd></div>
 
                 <div><dt>Итого к расчёту</dt><dd id="specAreaWithWaste">—</dd></div>
-                <div class="spec-list__nested"><dt>Количество без учёта отходов</dt><dd id="specBaseArea">—</dd></div>
+                <div class="spec-list__nested"><dt>Площадь помещения</dt><dd id="specBaseArea">—</dd></div>
                 <div class="spec-list__nested"><dt>Запас на укладку</dt><dd id="specWaste">—</dd></div>
 
                 <div><dt>Финишное покрытие</dt><dd id="specCoating">—</dd></div>
                 <div id="specGlossRow" class="spec-list__nested is-hidden"><dt>Степень блеска</dt><dd id="specGloss">—</dd></div>
 
-                <div><dt>Подходит для тёплого пола</dt><dd id="specUnderfloorHeating">—</dd></div>
+                <div><dt>Подходит для водяного тёплого пола</dt><dd id="specUnderfloorHeating">—</dd></div>
                 <div><dt>Конструкция</dt><dd>Запатентованная ламель WOODSTOCK</dd></div>
 
                 <div id="specCommentRow" class="is-hidden"><dt>Комментарий</dt><dd id="specComment">—</dd></div>

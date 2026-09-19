@@ -973,7 +973,9 @@ function buildPayload() {
   const pattern = selectedPattern();
   const calc = pricingState();
   const coating = (flooringData?.coatings || []).find((item) => item.id === form.finish.value) || null;
-  const fixedGloss = Number(flooringData?.meta?.quickCalculation?.fixedGlossPercent || 10);
+  const fixedGloss = coating?.glossRequired
+    ? Number(coating.defaultGloss ?? flooringData?.meta?.quickCalculation?.fixedGlossPercent ?? 10)
+    : null;
   const customPattern = pattern?.id === "custom";
   const standardBaseThickness = Number(flooringData?.meta?.baseThicknessMm || 12);
 
@@ -987,7 +989,7 @@ function buildPayload() {
       typeName: currentItem.materialTypeName,
       species: currentItem.species,
       topLayer: currentItem.topLayer,
-      patternType: currentItem.patternType || null,
+      chamfer: chamferLabel(currentItem.topLayer),
       baseMaterial: currentItem.baseMaterial || flooringData?.meta?.baseMaterial || "Влагостойкая фанера из берёзы",
       baseThicknessMm: standardBaseThickness,
       totalThicknessMm: Core.totalThickness(flooringData, currentItem, standardBaseThickness)
@@ -995,6 +997,7 @@ function buildPayload() {
     layout: {
       id: pattern.id,
       name: pattern.name,
+      angle: pattern.id === "hungarian_herringbone" ? 90 : null,
       roomArea: Number(form.roomArea.value),
       wastePercent: Number(form.waste.value),
       areaWithWaste: calc.area,
@@ -1005,8 +1008,10 @@ function buildPayload() {
     },
     finish: {
       id: form.finish.value,
-      name: finishLabels[form.finish.value] || coating?.name || "—",
-      gloss: coating?.glossRequired ? fixedGloss : null
+      name: coating?.id === "oil"
+        ? "3 слоя твёрдого воск-масла, матовое"
+        : finishLabels[form.finish.value] || coating?.name || "—",
+      gloss: fixedGloss
     },
     pricing: {
       catalogPricePerM2: calc.catalogPrice,
@@ -1083,6 +1088,15 @@ function pdfValue(value, fallback = "—") {
   return normalized || fallback;
 }
 
+function chamferLabel(topLayer) {
+  const thickness = Number.parseFloat(String(topLayer ?? "").replace(",", "."));
+  return Number.isFinite(thickness) && Math.abs(thickness - 0.6) < 1e-9
+    ? "Без фаски"
+    : Number.isFinite(thickness)
+      ? "С фаской с 4-х сторон"
+      : "—";
+}
+
 function connectionTypeForLength(value, fallback = "Определяется после уточнения длины") {
   const length = Number(value);
 
@@ -1149,10 +1163,15 @@ function createPdfDocument(payload) {
   const vat = payload.pricing.vat ? money.format(payload.pricing.vat) : "—";
   const clientFiles = payload.contact.files.length ? payload.contact.files.join(", ") : "";
   const customLayout = payload.layout.id === "custom";
-  const angle = payload.layout.id === "french_herringbone" ? "Уточняется менеджером" : "";
+  const angle = payload.layout.id === "french_herringbone"
+    ? "Уточняется менеджером"
+    : payload.layout.id === "hungarian_herringbone"
+      ? `${payload.layout.angle ?? 90}°`
+      : "";
   const layoutFiles = customLayout ? payload.layout.customPatternFiles.join(", ") : "";
   const layoutDescription = customLayout ? payload.layout.customPatternDescription : "";
   const calcNumber = calculationNumber(payload);
+  const chamfer = payload.material.chamfer || chamferLabel(payload.material.topLayer);
   const connectionType = connectionTypeForLength(payload.layout.boardLength);
   const includeSplineNote = connectionType === "Паз-паз на шпонку";
   const underfloorHeating = Core.underfloorHeatingLabel(payload.material.topLayer);
@@ -1192,7 +1211,6 @@ function createPdfDocument(payload) {
         { label: "Наименование", value: multishponParts.name },
         { label: "Тип шпона", value: payload.material.typeName },
         { label: "Страна происхождения шпона", value: "—" },
-        { label: "Тип рисунка", value: pdfValue(payload.material.patternType, "Нет данных") },
         { label: "Сортировка", value: "Селект+" }
       ]
     : [
@@ -1202,7 +1220,6 @@ function createPdfDocument(payload) {
         },
         { label: "Тип шпона", value: payload.material.typeName },
         { label: "Страна происхождения шпона", value: "—" },
-        { label: "Тип рисунка", value: pdfValue(payload.material.patternType, "Нет данных") },
         { label: "Сортировка", value: "Селект+" }
       ];
 
@@ -1235,11 +1252,12 @@ function createPdfDocument(payload) {
     "Шпон",
     "Ширина",
     "Длина",
+    "Наличие фаски",
     "Тип соединения",
     "Раскладка",
     "Итого к расчёту",
     "Финишное покрытие",
-    "Подходит для тёплого пола",
+    "Подходит для водяного тёплого пола",
     "Конструкция",
     "Примечание"
   ].map((text) => ({ text, style: "tableHeader", alignment: "center" }));
@@ -1264,6 +1282,7 @@ function createPdfDocument(payload) {
     groupedPdfCell(veneerDetails),
     compoundPdfCell(payload.layout.boardWidth ? `${number.format(payload.layout.boardWidth)} мм` : "—"),
     compoundPdfCell(payload.layout.boardLength ? `${number.format(payload.layout.boardLength)} мм` : "—"),
+    compoundPdfCell(chamfer),
     compoundPdfCell(connectionType),
     compoundPdfCell(payload.layout.name, [
       { label: "Угол торцевого реза", value: angle },
@@ -1271,11 +1290,13 @@ function createPdfDocument(payload) {
       { label: "Файлы индивидуальной раскладки", value: layoutFiles }
     ]),
     compoundPdfCell(`${number.format(payload.layout.areaWithWaste)} м²`, [
-      { label: "Количество без учёта отходов", value: `${number.format(payload.layout.roomArea)} м²` },
+      { label: "Площадь помещения", value: `${number.format(payload.layout.roomArea)} м²` },
       { label: "Запас на укладку", value: `${number.format(payload.layout.wastePercent)}%` }
     ]),
     compoundPdfCell(
-      String(payload.finish?.name || "—").replace(/,\s*блеск\s+\d+(?:[.,]\d+)?%\s*$/i, ""),
+      String(payload.finish?.name || "—")
+        .replace(/,\s*блеск\s+\d+(?:[.,]\d+)?%\s*$/i, "")
+        .replace(/\s+[—-]\s*\d+(?:[.,]\d+)?%\s+блеска\s*$/i, ""),
       [
         {
           label: "Степень блеска",
@@ -1292,7 +1313,7 @@ function createPdfDocument(payload) {
       { label: "Приложенные файлы", value: clientFiles }
     ])
   ];
-  const productBaseWidths = [14, 52, 32, 32, 78, 27, 29, 50, 62, 62, 55, 42, 58, 68];
+  const productBaseWidths = [14, 52, 32, 32, 78, 27, 29, 48, 50, 62, 62, 55, 42, 58, 68];
 
   return {
     pageSize: "A4",
@@ -1593,7 +1614,7 @@ function renderAll() {
   renderResult();
   if (ui.finishHint) {
     const finishHintText = form.finish.value === "uv_lacquer"
-      ? "Стандартная степень блеска — 10%. Другую степень блеска можно согласовать с менеджером."
+      ? "Стандартная степень блеска — 5%. Другую степень блеска можно согласовать с менеджером."
       : form.finish.value === "parquet_lacquer"
         ? "Стандартная степень блеска — 10%. Другую степень блеска можно согласовать с менеджером."
         : "";

@@ -178,13 +178,20 @@
   }
 
   function quickCoatingOptions(data) {
-    const fixedGloss = Number(data?.meta?.quickCalculation?.fixedGlossPercent || 10);
-    return (data?.coatings || []).map((coating) => ({
-      id: coating.id,
-      name: coating.glossRequired ? `${coating.name}, блеск ${fixedGloss}%` : coating.name,
-      gloss: coating.glossRequired ? fixedGloss : null,
-      sourceName: coating.name
-    }));
+    return (data?.coatings || []).map((coating) => {
+      const defaultGloss = coating.glossRequired
+        ? Number(coating.defaultGloss ?? data?.meta?.quickCalculation?.fixedGlossPercent ?? 10)
+        : null;
+
+      return {
+        id: coating.id,
+        name: coating.glossRequired
+          ? `${coating.name} — ${defaultGloss}% блеска`
+          : coating.name,
+        gloss: defaultGloss,
+        sourceName: coating.name
+      };
+    });
   }
 
   function calculatePricing({
