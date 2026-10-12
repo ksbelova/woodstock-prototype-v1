@@ -467,6 +467,17 @@ input[readonly]:focus {
 
 .field-grid > .field {
   min-width: 0;
+  margin-bottom: 0;
+}
+
+.form-block > .field-grid:not(.is-hidden),
+.form-block > .conditional-block:not(.is-hidden) {
+  margin-bottom: 20px;
+}
+
+.form-block > .field-grid:last-child,
+.form-block > .conditional-block:last-child {
+  margin-bottom: 0;
 }
 
 .field-grid--two {
@@ -1758,6 +1769,15 @@ input[type="file"]::file-selector-button:hover {
   gap: 20px;
 }
 
+.conditional-block > .field,
+.conditional-block > .field-warning {
+  margin-bottom: 0;
+}
+
+.conditional-block > .field-warning {
+  margin-top: 0;
+}
+
 .field-status {
   margin-top: 12px;
   padding: 13px 14px;
@@ -1802,17 +1822,15 @@ input[type="file"]::file-selector-button:hover {
 }
 
 
-/* Panels: standard sizes are shown as full-width orientation pairs. */
+/* Panels: standard sizes use the common responsive grid — two columns on desktop, one on mobile. */
 .standard-size-values {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
 }
 
 .standard-size-pair {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  min-width: 0;
   width: 100%;
 }
 
@@ -1820,18 +1838,9 @@ input[type="file"]::file-selector-button:hover {
   width: 100%;
 }
 
-.standard-size-pair--single .standard-size-choice {
-  grid-column: 1 / -1;
-}
-
 @media (max-width: 560px) {
   .standard-size-values {
     grid-template-columns: 1fr;
-  }
-
-  .standard-size-pair {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
   }
 }
 
