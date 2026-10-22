@@ -2348,7 +2348,9 @@ function buildSavedPosition(calc) {
     vat: calc.vat,
     comment: form.comment.value.trim(),
     files: serializeUploadedFiles(form.files),
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    editorState: exportFlooringState(),
+    specification: {characteristics: window.WoodstockSpecificationState.details(document.querySelector('.spec-groups')), knownTotal:calc.total,knownVat:calc.vat}
   };
 }
 
@@ -2475,37 +2477,53 @@ function addToSpecification() {
   addAttempted = false;
   touchedFields.clear();
 
-  let current = [];
+  window.WoodstockSpecificationState.save(buildSavedPosition(calc));
+}
 
-  try {
-    current = JSON.parse(
-      sessionStorage.getItem(
-        SPEC_STORAGE_KEY
-      ) || "[]"
-    );
-  } catch {
-    current = [];
-  }
-
-  current.push(
-    buildSavedPosition(calc)
-  );
-
-  sessionStorage.setItem(
-    SPEC_STORAGE_KEY,
-    JSON.stringify(current)
-  );
-
-  ui.saveStatus.textContent =
-    "Позиция добавлена в спецификацию.";
-
-  ui.addToSpecButton.textContent =
-    "Добавлено";
-
-  setTimeout(() => {
-    ui.addToSpecButton.textContent =
-      "Добавить в спецификацию";
-  }, 1200);
+function exportFlooringState() {
+  return window.WoodstockSpecificationState.clone({version:1,
+    form:window.WoodstockSpecificationState.snapshot(document.querySelector('.calc-form'),getUploadedFiles),
+    currentItem,customBaseEnabled,selectedSurcharges:[...selectedSurcharges],
+    selectedSpeciesName,selectedTopLayerValue,clientConditionId,dealerCategoryId,pricingConditionType,
+    activeTierKey,tierDiscountOverride,markupOverrides:[...markupOverrides]
+  });
+}
+function restoreFlooringState(state) {
+  if(state?.version!==1)throw new Error('У позиции отсутствуют данные для редактирования.');
+  window.WoodstockSpecificationState.restore(document.querySelector('.calc-form'),state.form,(input,files)=>uploadedFilesState.set(input,files));
+  currentItem=state.currentItem;customBaseEnabled=state.customBaseEnabled;selectedSurcharges=new Set(state.selectedSurcharges);
+  selectedSpeciesName=state.selectedSpeciesName;selectedTopLayerValue=state.selectedTopLayerValue;
+  clientConditionId=state.clientConditionId;dealerCategoryId=state.dealerCategoryId;pricingConditionType=state.pricingConditionType;
+  activeTierKey=state.activeTierKey;tierDiscountOverride=state.tierDiscountOverride;
+  markupOverrides.clear();state.markupOverrides.forEach(([key,value])=>markupOverrides.set(key,value));
+  renderUploadedFiles(form.files,ui.selectedFiles,"Файлы не выбраны",true);
+  renderUploadedFiles(form.customPatternFile,ui.customPatternFileName,"Файлы не выбраны",true);
+  renderSelectionSurcharges();renderAll();
+}
+function restoreFlooringRecord(record) {
+  if(record.editorState){restoreFlooringState(record.editorState);return;}
+  const set=(node,value,event='change')=>{if(!node||value===undefined||value===null)return;node.value=String(value);node.dispatchEvent(new Event(event,{bubbles:true}));};
+  const item=flooringData.items.find(item=>item.id===record.itemId||item.id===record.materialCode);
+  set(form.materialType,item?.materialType);set(form.species,record.species,'input');set(form.topLayer,record.topLayer);
+  set(form.patternType,record.patternType);set(form.pattern,record.patternId);set(form.angle,record.angle);
+  set(form.width,record.width,'input');set(form.length,record.length,'input');
+  if(record.baseThickness!==undefined&&record.baseThickness!==12){customBaseEnabled=true;ui.customBaseThicknessField.classList.remove('is-hidden');set(form.baseThickness,record.baseThickness,'input');}
+  set(form.boardArea,record.baseArea,'input');set(form.waste,record.wastePercent,'input');
+  set(form.coating,record.coatingId);set(form.gloss,record.gloss,'input');
+  set(form.customPattern,record.customPatternDescription||'','input');
+  uploadedFilesState.set(form.customPatternFile,(record.customPatternFile||[]).map(file=>typeof file==='string'?{name:file}:file));
+  uploadedFilesState.set(form.files,(record.files||[]).map(file=>typeof file==='string'?{name:file}:file));
+  set(form.comment,record.comment||'','input');set(form.loyalty,record.loyaltyTier||record.dealerCategory);
+  selectedSurcharges=new Set((record.markups||[]).filter(item=>['length','visual','selection:length','selection:visual'].includes(item.id)).map(item=>item.id.replace('selection:','')));
+  renderUploadedFiles(form.files,ui.selectedFiles,"Файлы не выбраны",true);
+  renderUploadedFiles(form.customPatternFile,ui.customPatternFileName,"Файлы не выбраны",true);
+  renderSelectionSurcharges();renderAll();
+}
+function captureFlooringPosition() {
+  addAttempted=true;renderAll();
+  const issues=requiredFieldIssues(),calc=calculatePrice();
+  if(issues.length||!calc){ui.saveStatus.textContent='Заполните: '+issues.map(issue=>issue.label).join(', ');if(issues[0])focusFirstIssue(issues[0]);return null;}
+  return buildSavedPosition(calc);
 }
 
 async function init() {
@@ -2677,7 +2695,9 @@ async function init() {
 }
 
 
-init().catch((error) => {
+const flooringReady = init();
+window.WoodstockFlooringController = {ready:flooringReady,result:calculatePrice,restoreRecord:restoreFlooringRecord,restoreState:restoreFlooringState,exportState:exportFlooringState,capture:captureFlooringPosition};
+flooringReady.catch((error) => {
   console.error(error);
   ui.priceStatus.classList.remove("is-hidden");
   ui.priceStatus.textContent = "Не удалось загрузить данные расчёта. Обновите страницу или обратитесь к менеджеру.";

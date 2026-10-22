@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const DATA_URL = "../../data/panels.json?v=20261012-edge-auto";
+  const DATA_URL = "../../data/panels.json?v=20261017-remove-ready-shirts";
   const Core = window.WoodstockPanelsCore;
   // Общая спецификация: инженерная доска уже сохраняется в этот же ключ.
   const SPEC_STORAGE_KEY = "woodstockDetailedSpecification";
@@ -136,7 +136,7 @@
 
   function baseThicknessOptions(base) {
     if (!base) return [];
-    const own = data?.thicknesses?.[base.id];
+    const own = window.WoodstockPanelsView?.thicknesses?.(base, data?.thicknesses?.[base.id], data) ?? data?.thicknesses?.[base.id];
     return Array.isArray(own) ? own : [];
   }
 
@@ -242,6 +242,7 @@
   }
 
   function existingSpecificationItems() {
+    if(Array.isArray(window.WoodstockSpecificationContext?.items))return window.WoodstockSpecificationContext.items;
     try {
       const parsed = JSON.parse(sessionStorage.getItem(SPEC_STORAGE_KEY) || "[]");
       return Array.isArray(parsed) ? parsed : [];
@@ -275,29 +276,30 @@
     if (!priceRow || typeof priceRow !== "object") return null;
     const retail = num(priceRow.retail);
     const requestedConditionId = clientConditionId || "retail";
-    if (requestedConditionId === "retail") {
-      return {
-        id: "retail", name: "Розничная цена", source: "retail",
-        price: Number.isFinite(retail) ? retail : null, retailPrice: Number.isFinite(retail) ? retail : null,
-        orderRunningM, conditionUnresolved: !Number.isFinite(retail), volumePricingDeferred: true
-      };
-    }
-
     const clientKey = clientConditionPriceKey(requestedConditionId);
-    const clientPrice = num(priceRow[clientKey]);
-    return {
+    const clientPrice = requestedConditionId === "retail" ? retail : num(priceRow[clientKey]);
+    const base = {
       id: requestedConditionId, name: clientConditionUiName(requestedConditionId),
-      source: Number.isFinite(clientPrice) ? "client" : "missing_client_condition",
+      source: Number.isFinite(clientPrice) ? (requestedConditionId === "retail" ? "retail" : "client") : "missing_client_condition",
       price: Number.isFinite(clientPrice) ? clientPrice : null,
       retailPrice: Number.isFinite(retail) ? retail : null,
-      orderRunningM, conditionUnresolved: !Number.isFinite(clientPrice), volumePricingDeferred: true
+      orderRunningM, conditionUnresolved: !Number.isFinite(clientPrice),
+      volumePricingDeferred: !window.WoodstockPanelsView?.edgeVolumePricing
     };
+    if (!window.WoodstockPanelsView?.edgeVolumePricing || !Number.isFinite(clientPrice)) return base;
+    const candidates = applicableEdgeVolumeLevels(orderRunningM)
+      .map(level => ({ level, price: num(priceRow[level.priceKey || level.id]) }))
+      .filter(candidate => Number.isFinite(candidate.price) && candidate.price < base.price)
+      .sort((a, b) => a.price - b.price);
+    if (!candidates.length) return base;
+    const selected = candidates[0];
+    return { ...base, id: selected.level.id, name: selected.level.name, source: "volume", price: selected.price };
   }
 
   const MULTI_LAYOUT_IDS = new Set(["straight", "diagonal45", "herringbone", "custom"]);
 
   function allowedLayoutsForType(type = selectedMaterialType()) {
-    const layouts = data?.layouts || [];
+    const layouts = (data?.layouts || []).filter(item => !window.WoodstockPanelsView?.allowLayout || window.WoodstockPanelsView.allowLayout(item));
     return type === "multi" ? layouts.filter((item) => MULTI_LAYOUT_IDS.has(item.id)) : layouts;
   }
 
@@ -360,7 +362,7 @@
     return sideBNeedsLayout() && Boolean(definition?.requiresProductionCost);
   }
 
-  function sandingEnabled() { return form.sandingSelect?.value !== "no"; }
+  function sandingEnabled() { return window.WoodstockPanelsView?.automaticOperations || form.sandingSelect?.value !== "no"; }
 
   function selectedLayout() {
     const layoutId = effectiveLayoutId();
@@ -796,7 +798,7 @@
       ? "Введите наименование или артикул готовой рубашки"
       : type
         ? "Введите название шпона"
-        : "Введите наименование шпона или готовой рубашки";
+        : "Введите наименование шпона";
   }
 
   function updateVeneerThicknessOptions({ preserve = true } = {}) {
@@ -827,7 +829,7 @@
     updateVeneerAInputAvailability();
   }
 
-  const VENEER_TYPE_ORDER = { natural: 0, design: 1, multi: 2, ready_shirt: 3 };
+  const VENEER_TYPE_ORDER = { natural: 0, design: 1, multi: 2 };
 
   function veneerDisplayName(item) {
     const name = String(item?.displayName || item?.name || "").trim();
@@ -926,6 +928,13 @@
     if (error) error.textContent = "";
   }
 
+  function patternChoiceRequired(variants, cuts) {
+    if (cuts.length < 2) return false;
+    if (!window.WoodstockPanelsView?.priceSensitivePatterns) return true;
+    const prices = cuts.map(cut => num(bestVeneerVariantForCut(variants, cut)?.prices?.retail));
+    return new Set(prices).size > 1;
+  }
+
   function syncVeneerCutUI(preserve = true) {
     const group = selectedVeneerAGroup;
     const applies = ["natural", "design"].includes(group?.type);
@@ -946,9 +955,9 @@
       return;
     }
 
-    if (!applies || cuts.length < 2) {
+    if (!applies || !patternChoiceRequired(variants, cuts)) {
       form.veneerCutField.classList.add("is-hidden");
-      const onlyCut = cuts[0] || "";
+      const onlyCut = cuts.length === 1 ? cuts[0] : "";
       form.veneerCutSelect.value = onlyCut;
       selectedVeneerA = onlyCut ? bestVeneerVariantForCut(variants, onlyCut) : bestVeneerVariant(variants);
       return;
@@ -997,9 +1006,9 @@
       return;
     }
 
-    if (!applies || cuts.length < 2) {
+    if (!applies || !patternChoiceRequired(variants, cuts)) {
       form.veneerBCutField.classList.add("is-hidden");
-      const onlyCut = cuts[0] || "";
+      const onlyCut = cuts.length === 1 ? cuts[0] : "";
       form.veneerBCutSelect.value = onlyCut;
       selectedVeneerB = onlyCut ? bestVeneerVariantForCut(variants, onlyCut) : bestVeneerVariant(variants);
       return;
@@ -1067,12 +1076,11 @@
     let candidates = [];
 
     if (which === "A") {
-      if (typeFilter === "ready_shirt") candidates = [...(data.readyShirts || [])];
-      else if (typeFilter) candidates = (data.veneers || []).filter((item) => item.type === typeFilter);
-      else candidates = [...(data.veneers || []), ...(data.readyShirts || [])];
+      if (typeFilter) candidates = (data.veneers || []).filter((item) => item.type === typeFilter);
+      else candidates = [...(data.veneers || [])];
     } else {
       if (!Number.isFinite(aThickness)) return [];
-      candidates = [...(data.veneers || []), ...(data.readyShirts || [])];
+      candidates = [...(data.veneers || [])];
     }
 
     candidates.forEach((item) => {
@@ -1551,7 +1559,7 @@
       pricePerRunningM: Number.isFinite(pricePerRunningM) ? pricePerRunningM : null,
       manualOrderPricePerM2: Number.isFinite(manualOrderPricePerM2) ? manualOrderPricePerM2 : null,
       conditionUnresolved: Boolean(automaticPrice?.conditionUnresolved),
-      volumePricingDeferred: Boolean(stockProgram),
+      volumePricingDeferred: Boolean(stockProgram && automaticPrice?.volumePricingDeferred),
       volumePriceLevels,
       volumePriceRanges: stockProgram ? (data.edgePriceLevels || []).filter(level => level.scope === "order_volume").map(level => ({ ...level })) : null,
       operationRateClass,
@@ -1654,6 +1662,7 @@
     const raw = form.separateEdgeMetersInput.value.trim();
     if (raw) markFieldTouched("separateEdgeMeters");
     if (!raw) {
+      separateEdgeMetersManual = false;
       setSeparateEdgeMetersError("");
       setSeparateEdgeMetersWarning("");
       recalc();
@@ -2059,9 +2068,9 @@
   }
 
   function calibrationState(base = selectedBase()) {
-    const enabled = calibrationAvailableForBase(base) && form.calibrationSelect?.value === "yes";
+    const enabled = window.WoodstockPanelsView?.automaticOperations ? calibrationRequiredForBase(base) : calibrationAvailableForBase(base) && form.calibrationSelect?.value === "yes";
     const sourceBaseThicknessMm = calibrationSourceBaseThicknessMm();
-    const baseThicknessAfterCalibrationMm = calibrationBaseThicknessAfterMm();
+    const baseThicknessAfterCalibrationMm = window.WoodstockPanelsView?.automaticOperations ? null : calibrationBaseThicknessAfterMm();
     const depthMm = calibrationDepthFromThicknesses(sourceBaseThicknessMm, baseThicknessAfterCalibrationMm);
     const valid = !enabled || (
       Number.isFinite(sourceBaseThicknessMm) && sourceBaseThicknessMm > 0 &&
@@ -2266,8 +2275,7 @@
     form.reverseSideSelect.innerHTML = "";
     form.reverseSideSelect.add(new Option("Черновой шпон", "rough"));
     form.reverseSideSelect.add(new Option("Бумага", "paper"));
-    form.reverseSideSelect.add(new Option("Без покрытия", "none"));
-    if (["rough", "paper", "none"].includes(previousReverseSide)) form.reverseSideSelect.value = previousReverseSide;
+    if (["rough", "paper"].includes(previousReverseSide)) form.reverseSideSelect.value = previousReverseSide;
     updateSidesUI();
   }
 
@@ -2736,6 +2744,35 @@
     return { valid, limit };
   }
 
+  function productionCostField() {
+    return `<label class="field is-hidden" data-production-cost-field>
+      <span class="field__label">Стоимость от производства, ₽ с НДС за позицию</span>
+      <input data-size-production-price type="text" inputmode="decimal" autocomplete="off" value="" />
+      <span class="field__note" data-production-cost-note>Сумма за всё количество в строке. Только нерассчитанные основа и работы. Уже учтённые материалы и операции в эту сумму не включаются.</span>
+      <span class="field__error" data-production-cost-error></span>
+    </label>`;
+  }
+  function parseProductionCost(value) {
+    const raw=String(value||'').replace(/\s/g,'');
+    if(!/^\d+(?:[.,]\d{1,2})?$/.test(raw))return null;
+    const amount=Number(raw.replace(',','.'));
+    return Number.isFinite(amount)&&amount>0&&Number.isSafeInteger(Math.round(amount*100))?amount:null;
+  }
+  function productionCostSignature(item,finish,edge,scope) {
+    const rowEdge=edge?.positionSettings?.find(entry=>entry.rowId===item.rowId);
+    return JSON.stringify({scope,base:selectedBase()?.id,thickness:normalizeThicknessKey(currentBaseThicknessRaw()),
+      veneerA:selectedVeneerA?.id,veneerB:selectedVeneerB?.id,veneerThickness:selectedVeneerThickness(),
+      sides:form.veneeredSidesSelect.value,reverse:form.reverseSideSelect.value,backMode:form.veneerBModeSelect.value,
+      roughBack:form.veneerBRoughThicknessSelect.value,cut:form.veneerCutSelect.value,backCut:form.veneerBCutSelect.value,
+      layout:effectiveLayoutId(),backLayout:effectiveLayoutBId(),layoutComment:form.layoutTzComment.value,layoutFiles:uploadedFileNames(form.layoutTzFiles),
+      sanding:sandingEnabled(),calibration:form.calibrationSelect.value,target:num(form.calibrationTargetInput.value),depth:num(form.calibrationDepthInput.value),
+      length:item.length,width:item.width,quantity:item.quantity,manufacturing:item.manufacturingType,transition:item.transition,
+      comment:item.comment,files:item.files,finish:finish?.config,
+      edge:{mode:edge?.mode,type:edge?.typeId,name:edge?.veneerName||edge?.name,sides:rowEdge?.sidesId||edge?.sidesId,
+        thickness:rowEdge?.thicknessMm??edge?.thicknessMm,width:rowEdge?.widthMm??edge?.widthMm,bevel:edge?.bevel}
+    });
+  }
+
   function sizeRowTemplate(values = {}) {
     const id = `size_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     return `<div class="size-row" data-size-row data-row-id="${id}" data-size-mode="">
@@ -2806,6 +2843,7 @@
           <p class="field__error" data-size-transition-details-error></p>
         </div>
       </div>
+      ${productionCostField()}
     </div>`;
   }
 
@@ -2858,6 +2896,21 @@
   }
 
 
+  function shortTransitionState() {
+    const rows = $$('[data-size-row]', form.sizeRows).filter(row => $('[data-size-transition]', row)?.checked);
+    const pieces = rows.reduce((sum,row) => {
+      const q = quantityValueState(row);
+      return sum + (q.valid && num($('[data-size-length]',row)?.value)>0 && num($('[data-size-width]',row)?.value)>0 ? q.value : 0);
+    }, 0);
+    const described = Boolean(form.commentInput?.value.trim()) || uploadedFileNames(form.filesInput).length > 0 || rows.some(row => Boolean($('[data-size-comment]',row)?.value.trim()) || uploadedFileNames($('[data-size-files]',row)).length > 0);
+    return {pieces,described};
+  }
+  function transitionQuantityMessage() {
+    return window.WoodstockPanelsView?.transitionMinimumPieces
+      ? "Для перехода рисунка добавьте минимум две детали."
+      : "Для перехода рисунка каждая деталь должна быть отдельной позицией. Укажите 1 шт. и добавьте отдельные позиции для остальных деталей.";
+  }
+
   function updateSizeTransitionUI(row) {
     const transition = Boolean($('[data-size-transition]', row)?.checked);
     const quantityState = quantityValueState(row);
@@ -2868,10 +2921,10 @@
     const detailsKey = `sizeTransitionDetails:${rowId}`;
     const quantityError = $('[data-size-transition-quantity-error]', row);
     const detailsError = $('[data-size-transition-details-error]', row);
-    const quantityInvalid = transition && quantityState.valid && Number.isFinite(quantity) && quantity > 1;
-    const detailsInvalid = transition && !hasDescription;
+    const quantityInvalid = transition && (window.WoodstockPanelsView?.transitionMinimumPieces ? shortTransitionState().pieces < window.WoodstockPanelsView.transitionMinimumPieces : quantityState.valid && Number.isFinite(quantity) && quantity > 1);
+    const detailsInvalid = transition && !(window.WoodstockPanelsView?.transitionMinimumPieces ? shortTransitionState().described : hasDescription);
     if (quantityError) quantityError.textContent = quantityInvalid && (addAttempted || touchedFields.has(transitionKey))
-      ? "Для перехода рисунка каждая деталь должна быть отдельной позицией. Укажите 1 шт. и добавьте отдельные позиции для остальных деталей."
+      ? transitionQuantityMessage()
       : "";
     if (detailsError) detailsError.textContent = detailsInvalid && (addAttempted || touchedFields.has(detailsKey))
       ? "Добавьте описание перехода рисунка или приложите файл."
@@ -2981,6 +3034,8 @@
       sourceStandardLength: num(sourceRow.dataset.sourceStandardLength),
       sourceStandardWidth: num(sourceRow.dataset.sourceStandardWidth)
     };
+    const sourceFinish = positionFinishState.get(sourceRow.dataset.rowId);
+    const sourceEdge = positionEdgeState.get(sourceRow.dataset.rowId);
     const targetRow = addSizeRow(values);
     $('[data-size-transition]', targetRow).checked = Boolean($('[data-size-transition]', sourceRow)?.checked);
     $('[data-size-comment]', targetRow).value = $('[data-size-comment]', sourceRow)?.value || "";
@@ -2993,19 +3048,22 @@
       if (targetFileNames) renderUploadedFiles(targetFiles, targetFileNames, true);
     }
 
-    const sourceFinish = positionFinishState.get(sourceRow.dataset.rowId);
     if (sourceFinish) {
       positionFinishState.set(targetRow.dataset.rowId, {
         ...sourceFinish,
         files: [...(sourceFinish.files || [])]
       });
     }
-    const sourceEdge = positionEdgeState.get(sourceRow.dataset.rowId);
     if (sourceEdge) positionEdgeState.set(targetRow.dataset.rowId, { ...sourceEdge });
 
+    const productionInput=$('[data-size-production-price]',targetRow);
+    if(productionInput){productionInput.value=$('[data-size-production-price]',sourceRow)?.value||'';targetRow.dataset.productionSignature=sourceRow.dataset.productionSignature||'';}
     updateSizeRowAvailability(targetRow);
     updateSizeTransitionUI(targetRow);
-    if (positionFinishOverridesEnabled) renderPositionFinishOverrides();
+    // The new DOM cards still contain defaults. Render the copied state before
+    // recalculation captures their values back into the position maps.
+    if (positionFinishOverridesEnabled) renderPositionFinishOverrides(false);
+    if (positionEdgeOverridesEnabled) renderPositionEdgeOverrides(false);
     recalc();
     return targetRow;
   }
@@ -3055,7 +3113,8 @@
         : { valid: true, limit: null };
       size.technologicalSizeValid = technologicalState.valid;
       size.technologicalSizeLimit = technologicalState.limit;
-      size.sizeValid = physicalSizeValid && technologicalState.valid;
+      size.minimumSizeValid = manufacturingType !== "exact" || !(length > 0 && width > 0) || (length >= 50 && width >= 50);
+      size.sizeValid = physicalSizeValid && technologicalState.valid && size.minimumSizeValid;
       size.area = length && width && quantity && size.sizeValid ? length * width * quantity / 1_000_000 : 0;
       size.calcArea = calcLength && calcWidth && quantity && size.sizeValid ? calcLength * calcWidth * quantity / 1_000_000 : 0;
       return size;
@@ -3309,6 +3368,9 @@
       return false;
     }
 
+    if (manufacturingTypeForRow(row) === "exact" && value < 50) {
+      setSizeFieldError(row,key,"Минимальный размер готовой детали — 50 мм по каждой стороне.");recalc();return false;
+    }
     const formats = productionSourceFormatsForBase();
     if (!formats.length) {
       setSizeFieldError(row, key, "");
@@ -3756,24 +3818,25 @@
       return started && !(size.length > 0 && size.width > 0 && size.quantityValid);
     });
     const quantityInvalidRows = sizes.filter((size) => size.mode && size.length > 0 && size.width > 0 && !size.quantityValid);
-    const transitionQuantityInvalidRows = sizes.filter((size) => size.transition && size.quantityValid && Number.isFinite(size.quantity) && size.quantity > 1);
-    const transitionDescriptionInvalidRows = sizes.filter((size) => size.transition && !size.comment && !size.files.length);
+    const transitionQuantityInvalidRows = sizes.filter((size) => size.transition && (window.WoodstockPanelsView?.transitionMinimumPieces ? shortTransitionState().pieces < window.WoodstockPanelsView.transitionMinimumPieces : size.quantityValid && Number.isFinite(size.quantity) && size.quantity > 1));
+    const transitionDescriptionInvalidRows = sizes.filter((size) => size.transition && !(window.WoodstockPanelsView?.transitionMinimumPieces ? shortTransitionState().described : size.comment || size.files.length));
+    const minimumSizeInvalidRows = sizes.filter(size => size.minimumSizeValid === false);
     const physicalSizeInvalidRows = sizes.filter((size) => size.physicalSizeValid === false);
     const technologicalSizeInvalidRows = sizes.filter((size) => size.physicalSizeValid !== false && size.technologicalSizeValid === false);
     const sizeValidation = {
-      valid: incompleteSizeRows.length === 0 && quantityInvalidRows.length === 0 && transitionQuantityInvalidRows.length === 0 && transitionDescriptionInvalidRows.length === 0 && physicalSizeInvalidRows.length === 0 && technologicalSizeInvalidRows.length === 0,
+      valid: minimumSizeInvalidRows.length === 0 && incompleteSizeRows.length === 0 && quantityInvalidRows.length === 0 && transitionQuantityInvalidRows.length === 0 && transitionDescriptionInvalidRows.length === 0 && physicalSizeInvalidRows.length === 0 && technologicalSizeInvalidRows.length === 0,
       incompleteSizePositions: incompleteSizeRows.map((size) => size.position),
       quantityInvalidPositions: quantityInvalidRows.map((size) => size.position),
       transitionQuantityInvalidPositions: transitionQuantityInvalidRows.map((size) => size.position),
       transitionDescriptionInvalidPositions: transitionDescriptionInvalidRows.map((size) => size.position),
       physicalSizeInvalidPositions: physicalSizeInvalidRows.map((size) => size.position),
       technologicalSizeInvalidPositions: technologicalSizeInvalidRows.map((size) => size.position),
-      error: incompleteSizeRows.length
+      error: minimumSizeInvalidRows.length ? "Минимальный размер готовой детали — 50 мм по каждой стороне." : incompleteSizeRows.length
         ? `Заполните длину, ширину и количество в позициях ${incompleteSizeRows.map((size) => size.position).join(", ")} или удалите эти позиции.`
         : quantityInvalidRows.length
         ? "Введите количество целым числом от 1."
         : transitionQuantityInvalidRows.length
-          ? "Для перехода рисунка каждая деталь должна быть отдельной позицией. Укажите 1 шт. и добавьте отдельные позиции для остальных деталей."
+          ? transitionQuantityMessage()
           : transitionDescriptionInvalidRows.length
             ? "Добавьте описание перехода рисунка или приложите файл."
             : physicalSizeInvalidRows.length
@@ -3787,7 +3850,7 @@
     };
     if (incompleteSizeRows.length) warnings.push(sizeValidation.error);
     if (quantityInvalidRows.length) warnings.push("Введите количество целым числом от 1.");
-    if (transitionQuantityInvalidRows.length) warnings.push("Для перехода рисунка каждая деталь должна быть отдельной позицией. Укажите 1 шт. и добавьте отдельные позиции для остальных деталей.");
+    if (transitionQuantityInvalidRows.length) warnings.push(transitionQuantityMessage());
     if (transitionDescriptionInvalidRows.length) warnings.push("Добавьте описание перехода рисунка или приложите файл.");
     technologicalSizeInvalidRows.forEach((size) => {
       const limit = size.technologicalSizeLimit;
@@ -3828,6 +3891,17 @@
     let cuttingPricingStatus = "not_required", cuttingRequiresProductionCost = false;
     const itemResults = [], veneerPricings = [], readyShirtPricings = [], mdfPricings = [], baseRatePricings = [], veneerWasteAdjustments = [];
     const positionCostByRowId = new Map();
+    // Completeness follows the same component scopes as the existing cost ledger.
+    const positionPendingCosts = new Map();
+    const markPositionPending = (items, reason) => {
+      if (!window.WoodstockPanelsView?.positionPricing) return;
+      (Array.isArray(items) ? items : [items]).forEach(item => {
+        const rowId = item?.rowId;
+        if (!rowId) return;
+        if (!positionPendingCosts.has(rowId)) positionPendingCosts.set(rowId, new Set());
+        positionPendingCosts.get(rowId).add(reason);
+      });
+    };
     const addPositionCost = (sizeOrRowId, value) => {
       const rowId = typeof sizeOrRowId === "string" ? sizeOrRowId : sizeOrRowId?.rowId;
       const cost = Number(value);
@@ -3927,10 +4001,10 @@
           } else {
             cuttingPricingStatus = "missing_tariff";
             warnings.push(`Нет подтверждённого тарифа припила для ${base?.name || "основы"} ${baseThicknessDisplay(thickness)}.`);
-            hasPartialPrice = true;
+            (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
           }
         }
-        retailTotal += retailCost; finalTotal += finalCost; standardFinalSubtotal += finalCost; if (p.partial) hasPartialPrice = true;
+        retailTotal += retailCost; finalTotal += finalCost; standardFinalSubtotal += finalCost; if (p.partial) (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
         mdfPricings.push({
           standard, size, quantity: size.quantity, mdfVolumeId, condition,
           discountKey, ...p
@@ -3968,7 +4042,7 @@
           retailCost += baseWorkRetail;
           if (basePricing.conditionUnresolved) {
             baseWork = 0;
-            hasPartialPrice = true;
+            (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
             warnings.push(`Стандарт по запросу: для компонента «${basePricing.componentLabel}» нет подтверждённой цены условия «${basePricing.conditionName}»; розничная ставка автоматически не подставляется.`);
             breakdown.push({
               label: `Стандарт по запросу · ${size.length}×${size.width}`,
@@ -3996,7 +4070,7 @@
             warnings.push(`Стандарт по запросу: нет подтверждённой ставки для ${base.name} ${baseThicknessDisplay(thickness)}, ${sides} ст., шпон ${Number.isFinite(veneerThickness) ? `${String(veneerThickness).replace(".", ",")} мм` : "—"}. Базовая стоимость не включена.`);
             standardRequestWarnings.add(key);
           }
-          hasPartialPrice = true;
+          (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
         } else {
           // Итоговая стоимость производства для этой основы не рассчитывается в отдельной позиции.
           // Известные компоненты (в том числе шпон) продолжают рассчитываться отдельно.
@@ -4040,7 +4114,7 @@
           } else {
             roughBackPricingStatus = "requires_clarification";
             warnings.push("Стандарт по запросу: для выбранной толщины чернового шпона нет подтверждённой ставки; стоимость не включена.");
-            hasPartialPrice = true;
+            (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
           }
         } else if (!faceVeneerOnBackRequested && Number(form.veneeredSidesSelect.value) === 1 && form.reverseSideSelect.value === "paper") {
           const paperRate = num(data.meta.paperBackRatePerM2);
@@ -4051,7 +4125,7 @@
             breakdown.push({ label: "Бумага стороны Б · стандарт", value: paper, note: `${money(paperRate)}/м².` });
           } else {
             warnings.push("Стандарт по запросу: ставка бумаги на обратной стороне не задана; стоимость не включена.");
-            hasPartialPrice = true;
+            (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
           }
         }
 
@@ -4080,19 +4154,19 @@
               : `Дополнительная работа ${money(diagonalRate)}/м²; листовой шпон рассчитывается отдельно по листам.` });
           } else {
             warnings.push("Диагональ 45°: ставка дополнительной работы не задана; стоимость не включена.");
-            hasPartialPrice = true;
+            (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
           }
         }
 
         if (layout === "herringbone" && !manufacturingCostFromProduction(size)) {
           const rate = num(data.meta.herringboneWorkSurchargePerM2);
           if (Number.isFinite(rate)) { const cost = area * rate; retailCost += cost; finalCost += cost; breakdown.push({ label: "Ёлочка · сторона А", value: cost, note: `${money(rate)}/м².` }); }
-          else { hasPartialPrice = true; warnings.push("Не подтверждена ставка ёлочки стороны А."); }
+          else { (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции")); warnings.push("Не подтверждена ставка ёлочки стороны А."); }
         }
         if (classification.id === "standard_request" && sideBNeedsLayout() && ["diagonal45", "herringbone"].includes(layoutB) && !manufacturingCostFromProduction(size)) {
           const rate = num(layoutB === "herringbone" ? data.meta.herringboneWorkSurchargePerM2 : data.meta.diagonalWorkSurchargePerM2);
           if (Number.isFinite(rate)) { const cost = area * rate; retailCost += cost; finalCost += cost; breakdown.push({ label: `${layoutB === "herringbone" ? "Ёлочка" : "Диагональ 45°"} · сторона Б`, value: cost, note: `${money(rate)}/м².` }); }
-          else { hasPartialPrice = true; warnings.push("Не подтверждена ставка диагонали стороны Б."); }
+          else { (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции")); warnings.push("Не подтверждена ставка диагонали стороны Б."); }
         }
         if (cleanCuttingRequired(size)) {
           const meters = ((size.length + size.width) * 2 / 1000) * size.quantity;
@@ -4114,7 +4188,7 @@
           } else {
             cuttingPricingStatus = "missing_tariff";
             warnings.push(`Нет подтверждённого тарифа припила для ${base?.name || "основы"} ${baseThicknessDisplay(thickness)}.`);
-            hasPartialPrice = true;
+            (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
           }
         }
 
@@ -4155,7 +4229,7 @@
             baseWorkRetail = area * rate;
             baseWork = basePricing.conditionUnresolved ? 0 : area * appliedRate;
             if (basePricing.conditionUnresolved) {
-              hasPartialPrice = true;
+              (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
               warnings.push(`Точный размер: для компонента «${basePricing.componentLabel}» нет подтверждённой цены условия «${basePricing.conditionName}»; розничная ставка автоматически не подставляется.`);
               breakdown.push({ label: `${base.name} + работа, ${size.length}×${size.width}`, value: 0, note: `Цена условия «${basePricing.conditionName}» для компонента не подтверждена — компонент не включён в итог.` });
             } else {
@@ -4181,9 +4255,9 @@
                 warnings.push(`Нестандарт со шпоном ${String(faceThickness).replace(".", ",")} мм: отдельная подтверждённая доплата для толщины, отличной от 0,6 мм и меньше 1,5 мм, отсутствует. Базовая ставка основы + работы включена, дополнительная корректировка не рассчитана.`);
                 standardRequestWarnings.add(key);
               }
-              hasPartialPrice = true;
+              (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
             }
-          } else { warnings.push(`Нет подтверждённой ставки нестандарта для ${base.name} ${baseThicknessDisplay(thickness)}, ${sides} ст.`); hasPartialPrice = true; }
+          } else { warnings.push(`Нет подтверждённой ставки нестандарта для ${base.name} ${baseThicknessDisplay(thickness)}, ${sides} ст.`); (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции")); }
         }
       } else if (base) {
         // Для режима production и для готовых рубашек стоимость соответствующей
@@ -4236,7 +4310,7 @@
           breakdown.push({ label: "Черновой шпон стороны Б", value: rough, note: `${money(roughRate)}/м² для подтверждённой толщины чернового шпона ${String(roughThickness).replace(".", ",")} мм.` });
         } else {
           roughBackPricingStatus = "requires_clarification";
-          hasPartialPrice = true;
+          (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
           warnings.push(`Черновая сторона Б: для выбранной толщины ${Number.isFinite(roughThickness) ? `${String(roughThickness).replace(".", ",")} мм` : "—"} нет подтверждённой ставки; компонент оставлен на согласование.`);
           breakdown.push({ label: "Черновой шпон стороны Б", value: 0, note: "Тариф для этой толщины не подтверждён — не включён автоматически." });
         }
@@ -4247,7 +4321,7 @@
           breakdown.push({ label: "Бумага стороны Б", value: paper, note: `${money(paperRate)}/м².` });
         } else {
           warnings.push("Для бумаги на обратной стороне ставка не задана; стоимость не включена.");
-          hasPartialPrice = true;
+          (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
         }
       }
 
@@ -4257,7 +4331,7 @@
       if (sideBNeedsLayout() && ["diagonal45", "herringbone"].includes(layoutB) && !manufacturingCostFromProduction(size)) {
         const rate = num(layoutB === "herringbone" ? data.meta.herringboneWorkSurchargePerM2 : data.meta.diagonalWorkSurchargePerM2);
         if (Number.isFinite(rate)) { const cost = area * rate; retailCost += cost; finalCost += cost; breakdown.push({ label: `${layoutB === "herringbone" ? "Ёлочка" : "Диагональ 45°"} · сторона Б`, value: cost, note: `${money(rate)}/м².` }); }
-        else { hasPartialPrice = true; warnings.push("Не подтверждена ставка диагонали стороны Б."); }
+        else { (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции")); warnings.push("Не подтверждена ставка диагонали стороны Б."); }
       }
       if (cleanCuttingRequired(size)) {
         const meters = ((size.length + size.width) * 2 / 1000) * size.quantity, rate = manufacturingCostFromProduction(size) ? null : cuttingRateFor(thickness.raw, base?.id);
@@ -4277,7 +4351,7 @@
         } else {
           cuttingPricingStatus = "missing_tariff";
           warnings.push(`Нет подтверждённого тарифа припила для ${base?.name || "основы"} ${baseThicknessDisplay(thickness)}.`);
-          hasPartialPrice = true;
+          (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
         }
       }
 
@@ -4411,17 +4485,22 @@
       sameMaterial(consumption.item, selectedVeneerA) && ["A", "A+B"].includes(consumption.sideKey)
     ));
     const mixMatchRequiredFaceArea = mixMatchRelevantConsumptions.reduce((sum, consumption) => sum + (consumption.requiredVeneerAreaM2 || 0), 0);
+    const mixMatchGroupRecords = existingSpecificationItems().filter(record =>
+      window.WoodstockSpecificationGroupId && (record.calculationGroupId || record.id) === window.WoodstockSpecificationGroupId &&
+      (record.layoutId || record.layoutAId) === "mixmatch" && record.materialSides?.A?.id === selectedVeneerA?.id
+    );
+    const mixMatchGroupRequiredArea = mixMatchRequiredFaceArea + mixMatchGroupRecords.reduce((sum, record) => sum + (Number(record.pricing?.mixMatchVeneer?.requiredVeneerAreaM2) || 0), 0);
     const mixMatchDefaultArea = num(data?.meta?.mixMatchDefaultVeneerAreaM2);
     const mixMatchMinimumPacks = Math.max(1, Math.round(num(data?.meta?.mixMatchMinimumPacks) || 3));
     const mixMatchAutomaticArea = mixMatchRequiredFaceArea > 0
-      ? Math.max(mixMatchRequiredFaceArea, Number.isFinite(mixMatchDefaultArea) && mixMatchDefaultArea > 0 ? mixMatchDefaultArea : mixMatchRequiredFaceArea)
+      ? Math.max(mixMatchGroupRequiredArea, Number.isFinite(mixMatchDefaultArea) && mixMatchDefaultArea > 0 ? mixMatchDefaultArea : mixMatchGroupRequiredArea)
       : null;
     const mixMatchOverrideId = "mixmatch:actualVeneerAreaM2";
     const mixMatchChangedManually = priceAdjustmentOverrides.has(mixMatchOverrideId);
     const mixMatchManualArea = num(priceAdjustmentOverrides.get(mixMatchOverrideId));
     const mixMatchActualFaceArea = mixMatchChangedManually ? mixMatchManualArea : mixMatchAutomaticArea;
     const mixMatchValid = layout !== "mixmatch" || !mixMatchRequiredFaceArea || (
-      Number.isFinite(mixMatchActualFaceArea) && mixMatchActualFaceArea + 1e-9 >= mixMatchRequiredFaceArea
+      Number.isFinite(mixMatchActualFaceArea) && mixMatchActualFaceArea + 1e-9 >= mixMatchGroupRequiredArea
     );
     const mixMatchValidationError = mixMatchValid ? "" : "Для MixMatch заложенный объём шпона не может быть меньше расчётной потребности.";
     if (layout === "mixmatch" && mixMatchValidationError) {
@@ -4455,10 +4534,10 @@
         automaticPaidAreaM2: num(automaticBasis.area) || mixMatchAutomaticArea,
         actualPaidAreaM2: num(actualBasis.area) || mixMatchActualFaceArea,
         paidSheets: Number.isFinite(num(actualBasis.sheets)) ? num(actualBasis.sheets) : null,
-        scale: mixMatchActualFaceArea / mixMatchRequiredFaceArea
+        scale: mixMatchActualFaceArea / mixMatchGroupRequiredArea
       };
       mixMatchRelevantConsumptions.forEach((consumption) => {
-        const share = mixMatchRequiredFaceArea > 0 ? consumption.requiredVeneerAreaM2 / mixMatchRequiredFaceArea : 0;
+        const share = mixMatchGroupRequiredArea > 0 ? consumption.requiredVeneerAreaM2 / mixMatchGroupRequiredArea : 0;
         const actualArea = mixMatchActualFaceArea * share;
         consumption.recommendedVeneerAreaM2 = mixMatchAutomaticArea * share;
         consumption.recommendedWastePercent = consumption.requiredVeneerAreaM2 > 0
@@ -4486,12 +4565,21 @@
     };
 
     const addVeneerComponent = (item, requiredArea, which, label, sameAsA = false, pricingMode = "standard") => {
+      const affectedPositions = itemResults.filter(row => row.classificationId === (pricingMode === "nonstandard" ? "nonstandard" : "standard_request"));
       const consumptionKey = consumptionKeyFor(item, which, sameAsA, pricingMode);
       const consumption = veneerConsumptions.find((entry) => entry.consumptionKey === consumptionKey) || null;
       if (!item || !Number.isFinite(requiredArea) || requiredArea <= 0) return;
+      const linkedConsumptions = existingSpecificationItems().filter(record =>
+        window.WoodstockSpecificationGroupId && (record.calculationGroupId || record.id) === window.WoodstockSpecificationGroupId &&
+        (record.layoutAId || record.layoutId) === layout
+      ).flatMap(record => record.veneerConsumptions || []).filter(entry =>
+        entry.materialId === item.id && entry.side === (sameAsA ? 'A+B' : which) && entry.pricingMode === pricingMode
+      );
+      const linkedArea = linkedConsumptions.reduce((sum,entry)=>sum+(Number(entry.actualVeneerAreaM2)||0),0);
+      const sharedArea = requiredArea + linkedArea;
       const mixMatchBasis = mixMatchVeneerPricing.applies && which === "A"
         ? Core.veneerVolumeBasis(item, mixMatchVeneerPricing.actualVeneerAreaM2)
-        : null;
+        : linkedConsumptions.length ? Core.veneerVolumeBasis(item, sharedArea) : null;
       const pricing = automaticVeneerPricing(item, requiredArea, which, pricingMode, mixMatchBasis);
       if (!pricing || !Number.isFinite(pricing.retailPrice) || !Number.isFinite(pricing.finalPrice)) {
         warnings.push(pricing?.requiresPriceAgreement
@@ -4500,6 +4588,7 @@
           ? `${label}: нет подтверждённой цены условия «${pricing.levelName}»; розничная цена автоматически не подставляется.`
           : `${label}: цена шпона не найдена в выбранной позиции; компонент не включён в стоимость.`);
         hasPartialPrice = true;
+        markPositionPending(affectedPositions, "Цена шпона");
         const pendingSheet = pricing?.requiresPriceAgreement && Core.isSheetBasedVeneer(item)
           ? Core.veneerPhysicalSheetDimensions(item) : null;
         const pendingRequirement = pendingSheet ? {
@@ -4520,8 +4609,18 @@
       const chargeableArea = mixMatchVeneerPricing.applies && which === "A"
         ? requiredArea * mixMatchVeneerPricing.scale
         : requiredArea;
-      const retailPurchase = veneerPurchase(item, chargeableArea, pricing.retailPrice, 0, warnings, label);
-      const finalPurchase = veneerPurchase(item, chargeableArea, pricing.finalPrice, 0, warnings, label);
+      const sharedMixMatch = mixMatchVeneerPricing.applies && which === "A" && mixMatchGroupRecords.length > 0;
+      const sharedPurchase = sharedMixMatch || linkedConsumptions.length > 0;
+      const purchaseArea = sharedMixMatch ? mixMatchActualFaceArea : linkedConsumptions.length ? sharedArea : chargeableArea;
+      const purchaseShare = sharedPurchase ? chargeableArea / purchaseArea : 1;
+      const sharePurchase = purchase => sharedPurchase ? {...purchase,
+        cost:Number.isFinite(purchase.cost)?purchase.cost*purchaseShare:purchase.cost,
+        area:Number.isFinite(purchase.area)?purchase.area*purchaseShare:purchase.area,
+        sheets:Number.isFinite(purchase.sheets)?purchase.sheets*purchaseShare:purchase.sheets,
+        note:purchase.note+' · доля позиции в общем расходе: '+round(purchaseShare*100,2)+'%'
+      } : purchase;
+      const retailPurchase = sharePurchase(veneerPurchase(item, purchaseArea, pricing.retailPrice, 0, warnings, label));
+      const finalPurchase = sharePurchase(veneerPurchase(item, purchaseArea, pricing.finalPrice, 0, warnings, label));
       if (consumption) {
         consumption.paidVeneerAreaM2 = Number.isFinite(finalPurchase.area) ? finalPurchase.area : null;
         consumption.purchasedWholeSheets = Number.isFinite(finalPurchase.sheets) ? finalPurchase.sheets : null;
@@ -4533,6 +4632,7 @@
       else standardRequestFinalSubtotal += finalPurchase.cost;
       allocateVeneerCostToPositions(finalPurchase.cost, which, sameAsA, pricingMode);
       hasPartialPrice ||= retailPurchase.partial || finalPurchase.partial;
+      if (retailPurchase.partial || finalPurchase.partial) markPositionPending(affectedPositions, "Цена шпона");
       const sheetBased = Core.isSheetBasedVeneer(item);
       const physicalSheet = sheetBased ? Core.veneerPhysicalSheetDimensions(item) : null;
       const sharedPanelSizes = sheetBased && pricingMode === "nonstandard"
@@ -4680,6 +4780,20 @@
         const purchasedSheets = Math.ceil(actualVeneerAreaM2 / physicalSheetAreaM2 - 1e-9);
         requirement = { ...requirement, purchasedSheets, paidAreaM2: purchasedSheets * physicalSheetAreaM2 };
       }
+      const linkedConsumptions = existingSpecificationItems().filter(record =>
+        window.WoodstockSpecificationGroupId && (record.calculationGroupId || record.id) === window.WoodstockSpecificationGroupId
+      ).flatMap(record => record.veneerConsumptions || []).filter(item =>
+        item.materialId === group.item?.id && item.side === sideKey && item.pricingMode === 'standard' &&
+        item.panelSize?.lengthMm === group.length && item.panelSize?.widthMm === group.width
+      );
+      if(linkedConsumptions.length && valid && physicalSheetAreaM2 > 0){
+        const batchActual = actualVeneerAreaM2 + linkedConsumptions.reduce((sum,item)=>sum+(Number(item.actualVeneerAreaM2)||0),0);
+        const batchRequired = requiredVeneerAreaM2 + linkedConsumptions.reduce((sum,item)=>sum+(Number(item.requiredVeneerAreaM2)||0),0);
+        const batchSheets = Math.ceil(batchActual / physicalSheetAreaM2 - 1e-9);
+        const share = batchRequired > 0 ? requiredVeneerAreaM2 / batchRequired : 1;
+        requirement = {...requirement,purchasedSheets:batchSheets*share,paidAreaM2:batchSheets*physicalSheetAreaM2*share,
+          sharedPurchaseSheets:batchSheets,sharedPaidAreaM2:batchSheets*physicalSheetAreaM2};
+      }
       const consumption = {
         id, consumptionKey, item: group.item, materialId: group.item?.id || "", materialName: veneerDisplayName(group.item),
         which: group.which, sideKey, sameAsA: group.sameAsA, pricingMode: "standard",
@@ -4691,7 +4805,7 @@
       };
       if (!valid) {
         warnings.push(validationError || "Фактическое количество шпона не задано.");
-        hasPartialPrice = true;
+        hasPartialPrice = true; markPositionPending(group.rows, "Цена листового шпона");
       }
       veneerConsumptions.push(consumption);
       veneerWasteAdjustments.push(consumption);
@@ -4708,9 +4822,30 @@
       group.pricingKey = pricingKey;
       if (!group.consumption?.valid || !group.requirement?.exact) return;
       const current = standardSheetPricingBasis.get(pricingKey) || { area: 0, sheets: 0, exact: true };
-      current.area += Number(group.requirement.paidAreaM2) || 0;
-      current.sheets += Number(group.requirement.purchasedSheets) || 0;
+      current.area += Number(group.requirement.sharedPaidAreaM2 ?? group.requirement.paidAreaM2) || 0;
+      current.sheets += Number(group.requirement.sharedPurchaseSheets ?? group.requirement.purchasedSheets) || 0;
       standardSheetPricingBasis.set(pricingKey, current);
+    });
+
+    // The original price tier covers the same veneer across all standard formats.
+    // Include linked formats that are not represented in this row's calculator.
+    const linkedStandardFormats = new Map();
+    existingSpecificationItems().filter(record => window.WoodstockSpecificationGroupId &&
+      (record.calculationGroupId || record.id) === window.WoodstockSpecificationGroupId
+    ).flatMap(record => record.veneerConsumptions || []).filter(entry => entry.pricingMode === 'standard' && entry.panelSize).forEach(entry => {
+      const pricingKey = `${entry.materialId}::${entry.side}`;
+      if(!standardSheetPricingBasis.has(pricingKey))return;
+      if(standardSheetGroupList.some(group => group.pricingKey === pricingKey && group.length === entry.panelSize.lengthMm && group.width === entry.panelSize.widthMm))return;
+      const key = `${pricingKey}::${entry.panelSize.lengthMm}x${entry.panelSize.widthMm}`;
+      const group = linkedStandardFormats.get(key) || {pricingKey,materialId:entry.materialId,actualArea:0};
+      group.actualArea += Number(entry.actualVeneerAreaM2) || 0;linkedStandardFormats.set(key,group);
+    });
+    linkedStandardFormats.forEach(group => {
+      const item = data.veneers.find(item => item.id === group.materialId);
+      const area = Core.veneerPhysicalSheetDimensions(item)?.areaM2;
+      if(!(area > 0))return;
+      const sheets = Math.ceil(group.actualArea / area - 1e-9),basis = standardSheetPricingBasis.get(group.pricingKey);
+      basis.sheets += sheets;basis.area += sheets * area;
     });
 
     standardSheetGroupList.forEach((group) => {
@@ -4733,7 +4868,7 @@
           : pricing?.conditionUnresolved
           ? `${groupLabel}: нет подтверждённой цены условия «${pricing.levelName}»; розничная цена автоматически не подставляется.`
           : `${groupLabel}: цена шпона не найдена в выбранной позиции; компонент не включён в стоимость.`);
-        hasPartialPrice = true;
+        hasPartialPrice = true; markPositionPending(group.rows, "Цена листового шпона");
         veneerPricings.push({
           which: group.which, item: group.item, sameAsA: group.sameAsA, pricingMode: "standard",
           label: groupLabel, ...(pricing || {}), calculationMethod: "by_sheets", calculationMethodLabel: "По листам", requirement: req,
@@ -4754,6 +4889,7 @@
         standardRequestFinalSubtotal += finalPurchase.cost;
       }
       hasPartialPrice ||= retailPurchase.partial || finalPurchase.partial;
+      if (retailPurchase.partial || finalPurchase.partial) markPositionPending(group.rows, "Цена листового шпона");
 
       if (Number.isFinite(finalPurchase.cost)) {
         allocatePositionCost(group.rows, finalPurchase.cost, (row) => (Number(row.area) || 0) * group.surfaceCount);
@@ -5009,7 +5145,11 @@
         const orderEdgeMeters = attachedEdgeMeters;
         positionSettings.forEach((item) => {
           if (!item.applies) return;
-          const selection = edgeSelectionState("attached", { thicknessMm: item.thicknessMm, widthMm: item.widthMm, orderRunningM: orderEdgeMeters });
+          const matchingMeters = window.WoodstockPanelsView?.edgeVolumePricing
+            ? positionSettings.filter(other => other.applies && other.selection?.catalogItemId === item.selection?.catalogItemId && other.widthMm === item.widthMm && other.thicknessMm === item.thicknessMm)
+              .reduce((sum, other) => sum + (other.calculatedMeters || 0), 0)
+            : orderEdgeMeters;
+          const selection = edgeSelectionState("attached", { thicknessMm: item.thicknessMm, widthMm: item.widthMm, orderRunningM: matchingMeters });
           item.selection = selection;
           if (!selection.valid && !item.validationError) item.validationError = selection.validationError;
           item.valid = !item.validationError;
@@ -5055,6 +5195,7 @@
               });
             } else {
               materialIncomplete = true;
+              markPositionPending(item, "Материал кромки: цена на согласовании");
               if (selection.stockProgram) {
                 materialPendingCondition = true;
                 warnings.push(`Позиция ${item.position}: для выбранной складской кромки нет цены «${selection.conditionName}» на ширину ${selection.widthMm} мм.`);
@@ -5066,7 +5207,10 @@
             }
 
             const productionOperation = manufacturingCostFromProduction(validSizes.find((size) => size.rowId === item.rowId));
-            const rateInfo = productionOperation ? null : attachedEdgeRateFor(thickness.raw, selection, attachedEdgeMeters, base?.id);
+            const groupEdgeMeters = attachedEdgeMeters + existingSpecificationItems().filter(record =>
+              window.WoodstockSpecificationGroupId && (record.calculationGroupId || record.id) === window.WoodstockSpecificationGroupId && record.edge?.mode === "attached"
+            ).reduce((sum, record) => sum + (Number(record.edge.calculatedMeters) || 0), 0);
+            const rateInfo = productionOperation ? null : attachedEdgeRateFor(thickness.raw, selection, groupEdgeMeters, base?.id);
             if (rateInfo && Number.isFinite(rateInfo.rate)) {
               const operationCost = meters * rateInfo.rate;
               operationCostTotal += operationCost;
@@ -5080,11 +5224,13 @@
               });
             } else if (productionOperation || operationPriceComesFromProduction(base)) {
               operationIncomplete = true;
+              markPositionPending(item, "Операция кромления: стоимость производства");
               operationPendingProduction = true;
               requiresOperationProductionCost = true;
               requiresProductionCost = true;
             } else {
               operationIncomplete = true;
+              markPositionPending(item, "Операция кромления: тариф не подтверждён");
               warnings.push(`Позиция ${item.position}: нет подтверждённого тарифа операции кромления для ${base?.name || "основы"} ${baseThicknessDisplay(thickness)} и выбранной толщины кромки.`);
               hasPartialPrice = true;
             }
@@ -5209,8 +5355,12 @@
     if (calibrationEnabled) {
       const calibrationTargetProvided = Number.isFinite(baseThicknessAfterCalibrationMm);
       if (!calibrationTargetProvided) {
-        calibrationPricingStatus = "missing_target";
-        if (addAttempted || touchedFields.has("calibrationTarget")) warnings.push("Укажите толщину основы после калибровки.");
+        calibrationPricingStatus = window.WoodstockPanelsView?.automaticOperations ? "pending_production" : "missing_target";
+        if (window.WoodstockPanelsView?.automaticOperations) {
+          calibrationRequiresProductionCost = true;
+          calibrationProductionArea = totalArea;
+          warnings.push("Калибровка ДСП: величина съёма не подтверждена; стоимость уточняет производство.");
+        } else if (addAttempted || touchedFields.has("calibrationTarget")) warnings.push("Укажите толщину основы после калибровки.");
         hasPartialPrice = true;
       } else if (!calibration.valid) {
         calibrationPricingStatus = "invalid_base_thickness";
@@ -5510,6 +5660,12 @@
     if (base && !base.weightDensityKgM3 && validSizes.length) warnings.push(`${base.name}: плотность в предоставленных данных не подтверждена; расчётный вес не выводится.`);
     const totalWeight = hasWeight ? { min: weightMin, max: weightMax } : null;
 
+    // The bevel tariff is not confirmed. Preserve the request without presenting a full automatic price.
+    if(edge.mode==='attached' && edge.bevel){
+      hasPartialPrice=true;requiresProductionCost=true;requiresOperationProductionCost=true;
+      itemResults.forEach(item=>markPositionPending(item,"Фаска: стоимость производства"));
+      warnings.push("Фаска: отдельный тариф не подтверждён; включите её в общий запрос стоимости производства.");
+    }
     const faceVeneerReady = Boolean(selectedVeneerA);
     const faceThicknessReady = isReadyShirt(selectedVeneerA) || Number.isFinite(selectedVeneerThickness());
     const reverseSideReady = (
@@ -5518,12 +5674,13 @@
       (roughSideRequested && roughSideCompatible) ||
       Boolean(selectedVeneerB || (selectedVeneerBGroup && selectedVeneerBGroup.type !== "natural"))
     ) && sideThicknessCompatible && roughSideCompatible;
-    const priceCalculationComplete = Boolean(
+    let priceCalculationComplete = Boolean(
       base &&
       Number.isFinite(thickness.total) &&
       validSizes.length &&
       faceVeneerReady &&
       faceThicknessReady &&
+      (!isAtLeastOnePointFive(veneerThickness) || sides === 2) &&
       reverseSideReady &&
       (!layoutSelectionRequired || layout) &&
       layoutValidation.valid &&
@@ -5531,9 +5688,72 @@
       !hasPartialPrice &&
       !requiresProductionCost
     );
+    if (window.WoodstockPanelsView?.positionPricing) {
+      itemResults.forEach(item => {
+        if (manufacturingCostFromProduction(item)) markPositionPending(item, "Стоимость производства");
+        if (thickVeneerWorkAdjustment.applies && isExactFinishedDetail(item) && !Number.isFinite(thickVeneerWorkAdjustment.actualCoefficient)) markPositionPending(item, "Работа с толстым шпоном");
+        if (sameFaceSelectionOnBack && isFaceOnlyExtraVeneer(selectedVeneerA) && !faceVeneerBItem && item.classificationId !== "warehouse_standard") markPositionPending(item, "Шпон оборотной стороны");
+        if (calibrationEnabled && !["calculated", "included_in_panel_price", "not_required"].includes(calibrationPricingStatus)) markPositionPending(item, "Калибровка: стоимость уточняет производство");
+        const finish = finishResults.find(entry => entry.rowId === item.rowId);
+        if (finish && (finish.totalFinishCost === null || finish.requiresProductionCost || [finish.toningPricingStatus,finish.isolatorPricingStatus].some(status => /pending|incomplete/.test(status || "")))) markPositionPending(item, "Финишное покрытие");
+      });
+    }
+    const productionCosts=[];
+    if(window.WoodstockPanelsView?.positionPricing){
+      const productionReason=reason=>/^(Стоимость производства|Основа и производственные операции|Работа с толстым шпоном|Операция кромления:|Калибровка:|Фаска:|Финишное покрытие)/.test(reason);
+      for(const item of itemResults){
+        const row=item.row,input=row?.querySelector('[data-size-production-price]');
+        const reasons=[...(positionPendingCosts.get(item.rowId)||[])],coveredReasons=reasons.filter(productionReason);
+        const required=coveredReasons.length>0;
+        const field=input?.closest('[data-production-cost-field]');
+        field?.classList.add("is-hidden");
+        let amount=null,invalid=false;
+        if(input){
+          input.value="";
+          const signature=productionCostSignature(item,finishResults.find(entry=>entry.rowId===item.rowId),edge,coveredReasons);
+          if(!required){input.value='';delete row.dataset.productionSignature;delete row.dataset.productionQuoteChanged;}
+          else if(input.value.trim()&&row.dataset.productionSignature&&row.dataset.productionSignature!==signature){
+            input.value='';delete row.dataset.productionSignature;row.dataset.productionQuoteChanged='true';
+          }
+          amount=required?parseProductionCost(input.value):null;
+          invalid=required&&!!input.value.trim()&&amount===null;
+          if(amount!==null){row.dataset.productionSignature=signature;delete row.dataset.productionQuoteChanged;}
+          input.setAttribute('aria-invalid',String(invalid));
+          const error=row.querySelector('[data-production-cost-error]');
+          if(error)error.textContent=invalid?'Введите положительную сумму в рублях, не более двух знаков после запятой.':'';
+          const note=row.querySelector('[data-production-cost-note]');
+          if(note)note.textContent=(row.dataset.productionQuoteChanged?'Параметры изменены. Подтвердите стоимость от производства заново. ':'')+'Сумма за всё количество в строке. Не рассчитано автоматически: '+coveredReasons.join('; ')+'. Укажите суммарную стоимость этих составляющих. Уже учтённые материалы и операции в эту сумму не включаются.';
+        }
+        if(required&&amount!==null){
+          addPositionCost(item,amount);finalTotal+=amount;retailTotal+=amount;
+          if(item.classificationId==='warehouse_standard')standardFinalSubtotal+=amount;
+          else if(item.classificationId==='standard_request')standardRequestFinalSubtotal+=amount;
+          else nonstandardFinalSubtotal+=amount;
+          positionPendingCosts.set(item.rowId,new Set(reasons.filter(reason=>!productionReason(reason))));
+          breakdown.push({label:`Стоимость от производства · позиция ${item.position}`,value:amount,note:'С НДС, за всю позицию. Только нерассчитанные основа и работы; уже учтённые составляющие не начисляются повторно.'});
+        }
+        item.productionCost={required,amount,invalid,coveredReasons,status:!required?'not_required':amount!==null?'provided':'pending'};
+        if(required)productionCosts.push({position:item.position,...item.productionCost});
+      }
+      if(productionCosts.length)requiresProductionCost=productionCosts.some(item=>item.status!=='provided');
+      if(productionCosts.some(item=>item.amount!==null)){
+        const materialUnresolved=veneerConsumptions.some(item=>!item.valid||!Number.isFinite(item.materialCost))||
+          readyShirtPricings.some(item=>!Number.isFinite(item.finalPurchase?.cost)||item.finalPurchase?.partial)||
+          (edge.mode!=='none'&&!['calculated','calculated_manual_order_price','not_required'].includes(edge.materialPricingStatus));
+        const pending=itemResults.some(item=>(positionPendingCosts.get(item.rowId)?.size||0)>0);
+        const parametersReady=Boolean(base&&Number.isFinite(thickness.total)&&validSizes.length&&faceVeneerReady&&faceThicknessReady&&(!isAtLeastOnePointFive(veneerThickness)||sides===2)&&reverseSideReady&&(!layoutSelectionRequired||layout)&&layoutValidation.valid&&sizeValidation.valid);
+        priceCalculationComplete=parametersReady&&!pending&&!materialUnresolved;
+        requiresProductionCost=productionCosts.some(item=>item.status!=='provided');
+        if(edge.mode==='attached'&&edge.operationRequiresProductionCost&&itemResults.filter(item=>item.productionCost?.coveredReasons.some(reason=>reason.startsWith('Операция кромления:'))).every(item=>item.productionCost.status==='provided')){
+          edge.operationPricingStatus='included_in_production_quote';edge.operationRequiresProductionCost=false;
+        }
+        hasPartialPrice=!priceCalculationComplete;
+      }
+    }
     const positionTotalSum = itemResults.reduce((sum, item) => sum + (positionCostByRowId.get(item.rowId) || 0), 0);
-    const positionPricingReconciled = !priceCalculationComplete ||
-      Math.abs(positionTotalSum + orderLevelUnallocatedCost - finalTotal) <= 0.05;
+    const knownPositionPricingReconciled = Math.abs(positionTotalSum + orderLevelUnallocatedCost - finalTotal) <= 0.005;
+    const positionPricingReconciled = window.WoodstockPanelsView?.positionPricing
+      ? knownPositionPricingReconciled : !priceCalculationComplete || Math.abs(positionTotalSum + orderLevelUnallocatedCost - finalTotal) <= 0.05;
     if (priceCalculationComplete && !positionPricingReconciled) {
       warnings.push("Позиционные стоимости не сошлись с итогом заказа; цены по отдельным позициям временно скрыты.");
     }
@@ -5545,6 +5765,15 @@
         positionPricingReconciled &&
         Number.isFinite(positionTotalRaw)
       );
+      if (window.WoodstockPanelsView?.positionPricing) {
+        const reasons = [...(positionPendingCosts.get(item.rowId) || [])];
+        const hasKnownPrice = positionPricingReconciled && (Number.isFinite(positionTotalRaw) || priceCalculationComplete);
+        item.positionKnownTotal = hasKnownPrice ? (positionTotalRaw || 0) : null;
+        item.positionKnownPricePerM2 = hasKnownPrice && item.area > 0 ? item.positionKnownTotal / item.area : null;
+        item.positionKnownPricePerPiece = hasKnownPrice && item.quantity > 0 ? item.positionKnownTotal / item.quantity : null;
+        item.positionPricingPartial = reasons.length > 0;
+        item.positionPendingCosts = reasons;
+      }
       item.positionPricingComplete = positionPricingComplete;
       item.positionTotal = positionPricingComplete ? positionTotalRaw : null;
       item.positionPricePerM2 = positionPricingComplete && Number.isFinite(item.area) && item.area > 0
@@ -5624,7 +5853,7 @@
       pricingStatus: roughBackPricingStatus === "not_required" ? "requires_clarification" : roughBackPricingStatus,
       source: "meta.roughBackVeneerRatesPerM2ByThickness"
     } : null;
-    return { base, thickness, sizes, validSizes, itemResults, totalArea, totalProductionArea, totalPieces, retailTotal, retailAvgM2: totalArea > 0 ? retailTotal / totalArea : null, automaticFinalTotal, finalTotal, manualDiscountPercent, manualDiscountCandidateTotal, manualDiscountApplied, vat, avgM2: totalArea > 0 ? finalTotal / totalArea : null, avgPiece: totalPieces > 0 ? finalTotal / totalPieces : null, totalWeight, warnings: [...new Set(warnings)], breakdown, hasPartialPrice, priceCalculationComplete, allStandard, attachedEdgeMeters, edge, edgeComment, orderLevelUnallocatedCost, mdfVolumeId, herringbone, customLayout, veneerPricings, readyShirtPricings, mdfPricings, baseRatePricings, veneerWasteAdjustments, veneerConsumptions, standardFinalSubtotal, standardRequestFinalSubtotal, nonstandardFinalSubtotal, roughBackVeneer, techOperations, finishResults, requiresBaseProductionCost, requiresLayoutProductionCost, requiresAllowanceProductionCost, requiresReadyShirtProductionCost, requiresFinishProductionCost, requiresOperationProductionCost, requiresProductionCost, thickVeneerWorkAdjustment, mixMatchVeneerPricing, layoutValidation, sizeValidation };
+    return { base, thickness, sizes, validSizes, itemResults, productionCosts, totalArea, totalProductionArea, totalPieces, retailTotal, retailAvgM2: totalArea > 0 ? retailTotal / totalArea : null, automaticFinalTotal, finalTotal, manualDiscountPercent, manualDiscountCandidateTotal, manualDiscountApplied, vat, avgM2: totalArea > 0 ? finalTotal / totalArea : null, avgPiece: totalPieces > 0 ? finalTotal / totalPieces : null, totalWeight, warnings: [...new Set(warnings)], breakdown, hasPartialPrice, priceCalculationComplete, allStandard, attachedEdgeMeters, edge, edgeComment, orderLevelUnallocatedCost, positionPricingReconciled, mdfVolumeId, herringbone, customLayout, veneerPricings, readyShirtPricings, mdfPricings, baseRatePricings, veneerWasteAdjustments, veneerConsumptions, standardFinalSubtotal, standardRequestFinalSubtotal, nonstandardFinalSubtotal, roughBackVeneer, techOperations, finishResults, requiresBaseProductionCost, requiresLayoutProductionCost, requiresAllowanceProductionCost, requiresReadyShirtProductionCost, requiresFinishProductionCost, requiresOperationProductionCost, requiresProductionCost, thickVeneerWorkAdjustment, mixMatchVeneerPricing, layoutValidation, sizeValidation };
   }
 
   function specRow(label, value, level = 0) {
@@ -6055,7 +6284,7 @@
     } else if (!Number.isFinite(automaticCoefficient)) {
       const meta = document.createElement("span");
       meta.className = "adjustment-manual";
-      meta.textContent = "Требуется вручную";
+      meta.textContent = "Укажите коэффициент или получите стоимость работ от производства для спецификации.";
       right.append(meta);
     }
 
@@ -6292,7 +6521,7 @@
     });
 
     const thickWork = result?.thickVeneerWorkAdjustment;
-    if (thickWork?.applies) {
+    if (thickWork?.applies && (result.itemResults||[]).some(item=>isExactFinishedDetail(item)&&!manufacturingCostFromProduction(item)&&!(item.productionCost?.status==='provided'&&item.productionCost.coveredReasons.includes('Работа с толстым шпоном')))) {
       const note = Number.isFinite(thickWork.automaticCoefficient)
         ? `Авто по стандартным ставкам: ${money(thickWork.thickRatePerM2)}/м² ÷ ${money(thickWork.baselineRatePerM2)}/м² = × ${round(thickWork.automaticCoefficient, 4)}`
         : "Нет пары стандартных ставок 0,6 мм / 1,5 мм+ для этой основы, толщины и количества сторон.";
@@ -6351,12 +6580,20 @@
     }
   }
 
+  function thickWorkCoefficientRequired(result) {
+    if(!result?.thickVeneerWorkAdjustment?.applies||Number.isFinite(result.thickVeneerWorkAdjustment.actualCoefficient))return false;
+    return (result.itemResults||[]).some(item=>isExactFinishedDetail(item)&&!manufacturingCostFromProduction(item)&&
+      !item.productionCost?.coveredReasons.includes('Работа с толстым шпоном'));
+  }
   function currentBlockingValidationIssues(result = lastCalculation) {
     const issues = [];
     const add = (key, label, control, message, errorNode = null, kind = "field") => {
       issues.push({ key, label, control, message, errorNode, kind });
     };
 
+    if (window.WoodstockPanelsView?.positionPricing && result?.positionPricingReconciled === false) {
+      add("positionPricing", "согласованную стоимость позиций", form.sizeRows, "Рассчитанные суммы позиций не согласованы с итогом. Проверьте расчёт.", form.sizeBlockError, "sizeBlock");
+    }
     const base = result?.base || selectedBase();
     const thickness = result?.thickness || parseThicknessComposition(currentBaseThicknessRaw());
     if (!base) {
@@ -6370,6 +6607,13 @@
         add("baseThickness", "доступную толщину основы", form.baseThicknessSelect,
           base.id === "blockboard" ? "Выберите доступную толщину столярной плиты из справочника." : "Выберите доступную толщину влагостойкой фанеры из справочника.");
       }
+    }
+
+    if (window.WoodstockPanelsView?.baseSelectable?.(base) === false) {
+      add("base", "МДФ или ДСП", form.baseSelect, "Для краткого расчёта выберите МДФ или ДСП.");
+    }
+    if (window.WoodstockPanelsView?.thicknesses && base && !baseThicknessOptions(base).some(value => normalizeThicknessKey(value) === normalizeThicknessKey(currentBaseThicknessRaw()))) {
+      add("baseThickness", "толщину с автоматической ценой", form.baseThicknessSelect, "Выберите толщину с подтверждённой автоматической ценой.");
     }
 
     const veneerType = form.veneerTypeSelect.value;
@@ -6429,14 +6673,21 @@
       }
     }
 
+    if (window.WoodstockPanelsView?.priceSensitivePatterns) {
+      [["A",form.veneerCutField,form.veneerCutSelect,form.veneerCutError], ["B",form.veneerBCutField,form.veneerBCutSelect,form.veneerBCutError]].forEach(([side,field,select,error]) => {
+        if (!field.classList.contains("is-hidden") && !select.value && (side === "A" || Number(form.veneeredSidesSelect.value) === 2 && form.veneerBModeSelect.value === "other"))
+          add("pattern"+side, "тип рисунка стороны "+side, select, "Выберите тип рисунка шпона.", error);
+      });
+    }
+
     const calibrationRequired = calibrationRequiredForBase(base);
     if (calibrationRequired && form.calibrationSelect.value !== "yes") {
       add("calibration", "калибровку основы", form.calibrationSelect, `Для ${String(base?.name || "выбранной основы").toLocaleLowerCase("ru")} калибровка обязательна.`);
     }
     const calibration = calibrationState(base);
-    if (calibration.enabled && !Number.isFinite(calibration.baseThicknessAfterCalibrationMm)) {
+    if (!window.WoodstockPanelsView?.automaticOperations && calibration.enabled && !Number.isFinite(calibration.baseThicknessAfterCalibrationMm)) {
       add("calibrationTarget", "толщину после калибровки", form.calibrationTargetInput, "Укажите толщину основы после калибровки.", form.calibrationTargetError);
-    } else if (calibration.enabled && !calibration.valid) {
+    } else if (!window.WoodstockPanelsView?.automaticOperations && calibration.enabled && !calibration.valid) {
       add("calibrationTarget", "толщину после калибровки", form.calibrationTargetInput, "Толщина основы после калибровки должна быть меньше исходной толщины основы.", form.calibrationTargetError);
     }
 
@@ -6453,7 +6704,7 @@
         invalidVeneerConsumption.validationError || "Укажите фактическое количество шпона.", null, "block");
     }
 
-    if (result?.thickVeneerWorkAdjustment?.applies && !Number.isFinite(result.thickVeneerWorkAdjustment.actualCoefficient)) {
+    if (thickWorkCoefficientRequired(result)) {
       add("thickVeneerWork", "коэффициент работы с толстым шпоном", form.priceAdjustmentsBlock,
         "Для точного размера со шпоном от 1,5 мм укажите коэффициент работы с толстым шпоном вручную.", null, "block");
     }
@@ -6550,6 +6801,10 @@
       }
     }
 
+    (result?.itemResults||[]).filter(item=>item.productionCost?.invalid).forEach(item=>{
+      const input=item.row.querySelector('[data-size-production-price]');
+      add(`productionCost:${item.rowId}`,`стоимость от производства позиции ${item.position}`,input,'Введите положительную сумму с точностью до копеек.',item.row.querySelector('[data-production-cost-error]'));
+    });
     return issues;
   }
 
@@ -6579,6 +6834,9 @@
       if (form.veneerBModeHint) form.veneerBModeHint.textContent = "";
     }
 
+    if (window.WoodstockPanelsView?.positionPricing && result?.positionPricingReconciled === false) {
+      add("positionPricing", "согласованную стоимость позиций", form.sizeRows, "Рассчитанные суммы позиций не согласованы с итогом. Проверьте расчёт.", form.sizeBlockError, "sizeBlock");
+    }
     const base = result?.base || selectedBase();
     const rawLayout = form.layoutSelect.value;
     const layoutRequired = needsLayoutSelection();
@@ -6676,9 +6934,9 @@
     }
 
     const calibration = calibrationState(base);
-    const calibrationInvalid = calibration.enabled && !calibration.valid;
+    const calibrationInvalid = !window.WoodstockPanelsView?.automaticOperations && calibration.enabled && !calibration.valid;
     const calibrationTouched = touchedFields.has("calibrationTarget");
-    const calibrationTargetMissing = calibration.enabled && !Number.isFinite(calibration.baseThicknessAfterCalibrationMm);
+    const calibrationTargetMissing = !window.WoodstockPanelsView?.automaticOperations && calibration.enabled && !Number.isFinite(calibration.baseThicknessAfterCalibrationMm);
     const calibrationMessage = calibrationTargetMissing && (addAttempted || calibrationTouched)
       ? "Укажите толщину основы после калибровки."
       : calibrationInvalid && (addAttempted || calibrationTouched)
@@ -6830,6 +7088,7 @@
     lastCalculation = calculate();
     if (!lastCalculation) {
       renderLocalValidation(null);
+      if (window.WoodstockPanelsView?.changed) window.WoodstockPanelsView.changed(null);
       return;
     }
     renderLocalValidation(lastCalculation);
@@ -6882,6 +7141,7 @@
       form.finalPriceNote.textContent = calculationBlockingMessage(lastCalculation);
     }
     updateVeneerLayoutWarnings(lastCalculation);
+    if (window.WoodstockPanelsView?.changed) window.WoodstockPanelsView.changed(lastCalculation);
   }
 
   function updateFinishUI() {
@@ -7204,12 +7464,15 @@
   function populate() {
     const typeLabels = new Map((data.veneerTypes || []).map((item) => [item.id, item.name]));
     data.veneers.forEach((x) => { if (!typeLabels.has(x.type)) typeLabels.set(x.type, x.typeName); });
-    if ((data.readyShirts || []).length && !typeLabels.has("ready_shirt")) typeLabels.set("ready_shirt", "Готовая рубашка");
-    (data.meta?.veneerTypeOrder || ["natural", "design", "multi", "ready_shirt"]).forEach((type) => {
+    (data.meta?.veneerTypeOrder || ["natural", "design", "multi"]).forEach((type) => {
       if (typeLabels.has(type)) form.veneerTypeSelect.add(new Option(typeLabels.get(type), type));
     });
-    data.bases.forEach((x) => form.baseSelect.add(new Option(x.name, x.id)));
-    form.baseSelect.value = "mdf";
+    data.bases.filter(x => !window.WoodstockPanelsView?.allowBase || window.WoodstockPanelsView.allowBase(x)).forEach((x) => {
+      const option = new Option(x.name, x.id);
+      option.disabled = window.WoodstockPanelsView?.baseSelectable?.(x) === false;
+      form.baseSelect.add(option);
+    });
+    form.baseSelect.value = window.WoodstockPanelsView?.emptyInitialBase ? "" : "mdf";
     syncLayoutOptions({ preserve: false });
     data.edgeSides.forEach((x) => {
       form.edgeSidesSelect.add(new Option(x.name, x.id));
@@ -7434,9 +7697,9 @@
         candidateTotal: Number.isFinite(result?.manualDiscountCandidateTotal) ? result.manualDiscountCandidateTotal : null
       },
       productionCost: {
-        required: Boolean(result?.requiresProductionCost),
-        status: result?.requiresProductionCost ? "pending_shared_specification" : "not_required",
-        totalCost: null,
+        required: Boolean(result?.requiresProductionCost)||(result?.productionCosts?.length||0)>0,
+        status: result?.productionCosts?.length&&result.productionCosts.every(item=>item.status==='provided')?'provided':(result?.requiresProductionCost||result?.productionCosts?.length)?'pending_shared_specification':'not_required',
+        totalCost: result?.productionCosts?.length&&result.productionCosts.every(item=>item.status==='provided')?result.productionCosts.reduce((sum,item)=>sum+item.amount,0):null,
         baseRequired: Boolean(result?.requiresBaseProductionCost),
         layoutRequired: Boolean(result?.requiresLayoutProductionCost),
         allowance20Required: Boolean(result?.requiresAllowanceProductionCost),
@@ -7495,7 +7758,7 @@
         automaticCoefficient: Number.isFinite(result.thickVeneerWorkAdjustment.automaticCoefficient) ? result.thickVeneerWorkAdjustment.automaticCoefficient : null,
         actualCoefficient: Number.isFinite(result.thickVeneerWorkAdjustment.actualCoefficient) ? result.thickVeneerWorkAdjustment.actualCoefficient : null,
         changedManually: Boolean(result.thickVeneerWorkAdjustment.changedManually),
-        manualRequired: Boolean(result.thickVeneerWorkAdjustment.manualRequired)
+        manualRequired: Boolean(result.thickVeneerWorkAdjustment.manualRequired)&&thickWorkCoefficientRequired(result)
       } : null,
       calibration: result?.techOperations?.calibration ? {
         enabled: true,
@@ -7565,7 +7828,13 @@
     };
   }
 
-  function saveToSpecification() {
+  function saveToSpecification({ capture = false } = {}) {
+    // Serialize known row costs with the existing presentation mode, then restore the normal form mode.
+    if(!window.WoodstockPanelsView?.positionPricing){
+      const view=window.WoodstockPanelsView;
+      window.WoodstockPanelsView={...view,positionPricing:true};
+      try{return saveToSpecification({capture});}finally{window.WoodstockPanelsView=view;}
+    }
     addAttempted = true;
     layoutValidationAttempted = true;
     recalc();
@@ -7610,11 +7879,11 @@
       return;
     }
     const calibrationForSave = calibrationState(lastCalculation.base);
-    if (calibrationForSave.enabled && !calibrationForSave.valid) {
+    if (!window.WoodstockPanelsView?.automaticOperations && calibrationForSave.enabled && !calibrationForSave.valid) {
       form.saveStatus.textContent = "Толщина основы после калибровки должна быть меньше исходной толщины основы";
       return;
     }
-    if (lastCalculation.thickVeneerWorkAdjustment?.applies && !Number.isFinite(lastCalculation.thickVeneerWorkAdjustment.actualCoefficient)) {
+    if (thickWorkCoefficientRequired(lastCalculation)) {
       form.saveStatus.textContent = "Для точного размера со шпоном от 1,5 мм укажите коэффициент работы с толстым шпоном вручную.";
       return;
     }
@@ -7756,7 +8025,7 @@
       requiresOperationProductionCost: Boolean(lastCalculation.requiresOperationProductionCost),
       requiresReadyShirtProductionCost: Boolean(lastCalculation.requiresReadyShirtProductionCost),
       requiresFinishProductionCost: Boolean(lastCalculation.requiresFinishProductionCost),
-      productionCostStatus: lastCalculation.requiresProductionCost ? "pending_shared_specification" : "not_required",
+      productionCostStatus: lastCalculation.productionCosts?.length&&lastCalculation.productionCosts.every(item=>item.status==='provided')?'provided':(lastCalculation.requiresProductionCost||lastCalculation.productionCosts?.length)?'pending_shared_specification':'not_required',
       layoutProductionCostStatus: lastCalculation.requiresLayoutProductionCost ? "pending_shared_specification" : "not_required",
       allowanceProductionCostStatus: lastCalculation.requiresAllowanceProductionCost ? "pending_shared_specification" : "not_required",
       readyShirtProductionCostStatus: lastCalculation.requiresReadyShirtProductionCost ? "pending_shared_specification" : "not_required",
@@ -7869,6 +8138,7 @@
           allocatedCost: Number.isFinite(calc.allocatedCost) ? calc.allocatedCost : null
         })),
         area: x.area,
+        productionCost:x.productionCost||null,
         weight: x.weight,
         transition: x.transition,
         transitionCoefficient: Number.isFinite(x.transitionCoefficient) ? x.transitionCoefficient : null,
@@ -7879,10 +8149,17 @@
         standard: x.classificationId !== "nonstandard",
         classificationId: x.classificationId,
         classificationName: x.classificationName,
-        pricingComplete: Boolean(x.positionPricingComplete),
-        total: Number.isFinite(x.positionTotal) ? x.positionTotal : null,
-        pricePerM2: Number.isFinite(x.positionPricePerM2) ? x.positionPricePerM2 : null,
-        pricePerPiece: Number.isFinite(x.positionPricePerPiece) ? x.positionPricePerPiece : null
+        ...(window.WoodstockPanelsView?.positionPricing ? {
+          knownSubtotal: x.positionKnownTotal,
+          knownPricePerM2: x.positionKnownPricePerM2,
+          knownPricePerPiece: x.positionKnownPricePerPiece,
+          pricingPartial: x.positionPricingPartial,
+          pendingCosts: x.positionPendingCosts || []
+        } : {}),
+        pricingComplete: window.WoodstockPanelsView?.positionPricing ? !x.positionPricingPartial && Number.isFinite(x.positionKnownTotal) : Boolean(x.positionPricingComplete),
+        total: window.WoodstockPanelsView?.positionPricing ? (!x.positionPricingPartial ? x.positionKnownTotal : null) : Number.isFinite(x.positionTotal) ? x.positionTotal : null,
+        pricePerM2: window.WoodstockPanelsView?.positionPricing ? (!x.positionPricingPartial ? x.positionKnownPricePerM2 : null) : Number.isFinite(x.positionPricePerM2) ? x.positionPricePerM2 : null,
+        pricePerPiece: window.WoodstockPanelsView?.positionPricing ? (!x.positionPricingPartial ? x.positionKnownPricePerPiece : null) : Number.isFinite(x.positionPricePerPiece) ? x.positionPricePerPiece : null
       })),
       edge: lastCalculation.edge?.mode === "none" ? {
         mode: "none",
@@ -8011,13 +8288,25 @@
       comment: form.commentInput.value.trim(), files: uploadedFileNames(form.filesInput),
       totalArea: lastCalculation.totalArea, total: lastCalculation.priceCalculationComplete ? lastCalculation.finalTotal : null, vat: lastCalculation.priceCalculationComplete ? lastCalculation.vat : null, totalWeight: lastCalculation.totalWeight, pricePerM2: lastCalculation.priceCalculationComplete ? lastCalculation.avgM2 : null, pricePerPiece: lastCalculation.priceCalculationComplete ? lastCalculation.avgPiece : null, pricingPartial: !lastCalculation.priceCalculationComplete, pricing: pricingSnapshot(lastCalculation), warnings: lastCalculation.warnings
     };
-    const existing = JSON.parse(sessionStorage.getItem(SPEC_STORAGE_KEY) || "[]"); existing.push(payload); sessionStorage.setItem(SPEC_STORAGE_KEY, JSON.stringify(existing));
-    addAttempted = false;
-    layoutValidationAttempted = false;
-    layoutFieldInteracted = false;
-    touchedFields.clear();
-    renderLocalValidation(lastCalculation);
-    form.saveStatus.textContent = `Позиция добавлена в общую спецификацию. Позиций: ${existing.length}. Параметры заказа и данные клиента задаются на следующих общих шагах.`;
+    payload.productionCosts=lastCalculation.productionCosts||[];
+    if(payload.basePrice.source==='production'){
+      payload.basePrice.cost=payload.productionCosts.length&&payload.productionCosts.every(item=>item.status==='provided')?payload.productionCosts.reduce((sum,item)=>sum+item.amount,0):null;
+      if(payload.basePrice.cost!==null)payload.basePrice.sourceLabel='Введённая стоимость основы и работ от производства с НДС';
+    }
+    if(window.WoodstockSpecificationGroupId)payload.calculationGroupId=window.WoodstockSpecificationGroupId;
+    payload.editorState = exportSpecificationState();
+    payload.specification = {
+      characteristics: window.WoodstockSpecificationState.details(form.specCharacteristics),
+      sizes: Array.from(form.specSizes.querySelectorAll('.spec-position-block')).map(node => window.WoodstockSpecificationState.details(node)),
+      knownTotal: lastCalculation.finalTotal,
+      knownVat: lastCalculation.vat,
+      unallocatedCost: lastCalculation.orderLevelUnallocatedCost,
+      breakdown: lastCalculation.breakdown,
+      adjustments: window.WoodstockSpecificationState.details(form.priceAdjustmentsList)
+    };
+    if (capture) return payload;
+    window.WoodstockSpecificationState.save(payload);
+    return;
   }
 
   function bind() {
@@ -8117,7 +8406,7 @@
 
     });
     form.sizeRows.addEventListener("input", (e) => {
-      if (!e.target.matches('[data-size-length],[data-size-width],[data-size-quantity],[data-size-comment]')) return;
+      if (!e.target.matches('[data-size-length],[data-size-width],[data-size-quantity],[data-size-comment],[data-size-production-price]')) return;
       const row = e.target.closest('[data-size-row]');
       if (row) {
         if (e.target.matches('[data-size-length]')) setSizeFieldError(row, "length", "");
@@ -8370,7 +8659,7 @@
     form.commentInput.addEventListener("input", recalc); form.addToSpecButton.addEventListener("click", saveToSpecification);
     bindFileInput(form.layoutTzFiles, form.layoutTzFileNames, true);
     form.layoutTzFiles.addEventListener("change", () => { markFieldTouched("layoutTz"); setLayoutTzError(false); recalc(); });
-    bindFileInput(form.filesInput, form.selectedFiles, true);
+    if (!window.WoodstockPanelsView || new URLSearchParams(location.search).has("specEngine")) bindFileInput(form.filesInput, form.selectedFiles, true);
   }
 
   async function init() {
@@ -8425,5 +8714,204 @@
     } catch (error) { console.error(error); form.saveStatus.textContent = "Не удалось загрузить данные расчёта. Откройте прототип через локальный HTTP-сервер."; }
   }
 
-  init();
+
+  function exportSpecificationState() {
+    capturePositionFinishStateFromDom(); capturePositionEdgeStateFromDom();
+    return window.WoodstockSpecificationState.clone({
+      version:1, form:window.WoodstockSpecificationState.snapshot(form.root,getUploadedFiles),
+      selectedVeneerAGroup,selectedVeneerA,selectedVeneerBGroup,selectedVeneerB,
+      attachedEdgeMaterialAuto,separateEdgeMaterialAuto,edgeWidthAutomatic,separateEdgeMetersManual,
+      veneerAPriceAuto,veneerBPriceAuto,veneerConditionChoices,manualDiscountPercentState,
+      positionFinishOverridesEnabled,positionEdgeOverridesEnabled,globalFinishSidesManual,calibrationForcedRequiredBaseId,
+      positionFinishState:[...positionFinishState],positionEdgeState:[...positionEdgeState],
+      priceAdjustmentOverrides:[...priceAdjustmentOverrides],veneerDemandSignatureState
+    });
+  }
+  function restoreSpecificationState(state) {
+    if (state?.version!==1) throw new Error('У позиции отсутствуют данные для редактирования.');
+    window.WoodstockSpecificationState.restore(form.root,state.form,(input,files)=>uploadedFilesState.set(input,files));
+    selectedVeneerAGroup=state.selectedVeneerAGroup; selectedVeneerA=state.selectedVeneerA;
+    selectedVeneerBGroup=state.selectedVeneerBGroup; selectedVeneerB=state.selectedVeneerB;
+    attachedEdgeMaterialAuto=state.attachedEdgeMaterialAuto; separateEdgeMaterialAuto=state.separateEdgeMaterialAuto;
+    Object.assign(edgeWidthAutomatic,state.edgeWidthAutomatic); separateEdgeMetersManual=state.separateEdgeMetersManual;
+    veneerAPriceAuto=state.veneerAPriceAuto; veneerBPriceAuto=state.veneerBPriceAuto;
+    Object.assign(veneerConditionChoices,state.veneerConditionChoices); manualDiscountPercentState=state.manualDiscountPercentState;
+    positionFinishOverridesEnabled=state.positionFinishOverridesEnabled; positionEdgeOverridesEnabled=state.positionEdgeOverridesEnabled;
+    globalFinishSidesManual=state.globalFinishSidesManual; calibrationForcedRequiredBaseId=state.calibrationForcedRequiredBaseId;
+    for (const [map,values] of [[positionFinishState,state.positionFinishState],[positionEdgeState,state.positionEdgeState],[priceAdjustmentOverrides,state.priceAdjustmentOverrides]]) {map.clear();values.forEach(([key,value])=>map.set(key,value));}
+    veneerDemandSignatureState=state.veneerDemandSignatureState;
+    renderUploadedFiles(form.filesInput,form.selectedFiles,true);
+    renderUploadedFiles(form.layoutTzFiles,form.layoutTzFileNames,true);
+    activeSizeRow=form.sizeRows.querySelector('[data-size-row]');
+    form.sizeRows.querySelectorAll('[data-size-row]').forEach(row=>{
+      if(!row.querySelector('[data-size-production-price]'))row.insertAdjacentHTML('beforeend',productionCostField());
+      const input=row.querySelector('[data-size-files]'),output=row.querySelector('[data-size-file-names]');
+      bindFileInput(input,output,true);
+      input.addEventListener('change',()=>{updateSizeTransitionUI(row);recalc();});
+    });
+    if(positionFinishOverridesEnabled)renderPositionFinishOverrides(false);
+    if(positionEdgeOverridesEnabled)renderPositionEdgeOverrides(false);
+    recalc();
+  }
+  function modifySpecificationRow(action,index) {
+    const row=form.sizeRows.querySelectorAll('[data-size-row]')[index];
+    if(!row)throw new Error('Позиция не найдена.');
+    if(action==='duplicate') duplicateSizeRow(row);
+    else {
+      row.querySelector('[data-remove-size-row]').click();
+      updateSizeRowIndexes();
+    }
+    recalc();
+    return saveToSpecification({capture:true});
+  }
+
+  function isolateSpecificationRow(index) {
+    const saved = exportSpecificationState();
+    const originalConsumptions = (lastCalculation.veneerConsumptions || []).map(item => ({...item}));
+    const count = form.sizeRows.querySelectorAll('[data-size-row]').length;
+    if (index < 0 || index >= count) throw new Error('Позиция не найдена.');
+    const captureSubset = (keep, retainManualEdge) => {
+      restoreSpecificationState(saved);
+      Array.from(form.sizeRows.querySelectorAll('[data-size-row]')).forEach((row, i) => {
+        if (!keep(i)) {
+          positionFinishState.delete(row.dataset.rowId);
+          positionEdgeState.delete(row.dataset.rowId);
+          row.remove();
+        }
+      });
+      updateSizeRowIndexes();
+      activeSizeRow = form.sizeRows.querySelector('[data-size-row]');
+      // A manually ordered separate edging batch belongs to the original calculation.
+      // Keep it once, with the first original row; never allocate or multiply its metres.
+      if (!retainManualEdge && form.edgeModeSelect.value === 'separate' && separateEdgeMetersManual) {
+        form.edgeModeSelect.value = 'none';
+      }
+      if (positionFinishOverridesEnabled) renderPositionFinishOverrides(false);
+      if (positionEdgeOverridesEnabled) renderPositionEdgeOverrides(false);
+      updateEdgeUI(); recalc();
+      // Preserve the calculator's existing proportional allocation of a manually specified batch.
+      for(const consumption of lastCalculation.veneerConsumptions || []){
+        const original = originalConsumptions.find(item => item.id === consumption.id);
+        if(original?.actualVeneerAreaManual && !original.mixMatchControlled && original.requiredVeneerAreaM2 > 0){
+          priceAdjustmentOverrides.set(consumption.id, original.actualVeneerAreaM2 * consumption.requiredVeneerAreaM2 / original.requiredVeneerAreaM2);
+        }
+      }
+      recalc();
+      const record = saveToSpecification({capture:true});
+      if (!record) throw new Error('Проверьте параметры изделия перед изменением позиции.');
+      return record;
+    };
+    try {
+      const before = index > 0 ? captureSubset(i => i < index, true) : null;
+      const after = index < count - 1 ? captureSubset(i => i > index, false) : null;
+      const selected = captureSubset(i => i === index, index === 0);
+      restoreSpecificationState(selected.editorState);
+      return {selected, before, after};
+    } catch (error) {
+      restoreSpecificationState(saved);
+      throw error;
+    }
+  }
+
+  // Restore the explicit fields written by earlier detailed-calculation versions.
+  // Catalog choices are matched by saved identifiers, never by a guessed price.
+  function restoreSpecificationRecord(record) {
+    window.WoodstockSpecificationGroupId=record.calculationGroupId||record.id||null;
+    if(record.editorState) {restoreSpecificationState(record.editorState);return;}
+    const set=(node,value,event='change')=>{if(!node||value===undefined||value===null)return;node.value=String(value);node.dispatchEvent(new Event(event,{bubbles:true}));};
+    const files=(input,names)=>{if(input)uploadedFilesState.set(input,(names||[]).map(file=>typeof file==='string'?{name:file}:file));};
+    const findMaterial=(side,fallback)=>{
+      const saved=record.materialSides?.[side];
+      return data.veneers.find(item=>item.id===saved?.id)||data.veneers.find(item=>veneerDisplayName(item)===(saved?.name||fallback));
+    };
+    set(form.baseSelect,record.baseId);set(form.baseThicknessSelect,record.baseThickness);
+    const face=findMaterial('A',record.veneerA);
+    if(face){set(form.veneerTypeSelect,face.type);form.veneerAInput.value=veneerDisplayName(face);onVeneerASelected(face);}
+    else if(record.materialSides?.A?.veneerType)set(form.veneerTypeSelect,record.materialSides.A.veneerType);
+    set(form.veneerThicknessSelect,record.veneerThickness??record.materialSides?.A?.thicknessMm);
+    const cut=(value)=>data.veneerCuts.find(item=>item.id===value||item.name===value)?.id||'';
+    set(form.veneerCutSelect,cut(record.veneerCut));set(form.veneeredSidesSelect,record.sides);
+    if(record.sides===2){
+      const b=record.materialSides?.B;
+      const mode=b?.sideType==='rough'?'rough':b?.sideType==='same'||b?.selectedAutomatically?'same':'other';
+      set(form.veneerBModeSelect,mode);
+      if(mode==='other'){const back=findMaterial('B',record.sideB);if(back){form.veneerBInput.value=veneerDisplayName(back);onVeneerBSelected(back);}}
+      if(mode==='rough')set(form.veneerBRoughThicknessSelect,b?.thicknessMm);
+      set(form.veneerBCutSelect,cut(record.veneerBCut));
+    } else {
+      const reverse=Array.from(form.reverseSideSelect.options).find(option=>option.textContent.trim()===record.sideB);
+      if(reverse)set(form.reverseSideSelect,reverse.value);
+    }
+    const layout=data.layouts.find(item=>item.id===(record.layoutId||record.layoutAId)||item.name===record.layout);
+    set(form.layoutSelect,layout?.id);set(form.layoutBSelect,record.layoutBId);
+    set(form.layoutTzComment,record.layoutTzComment||'','input');files(form.layoutTzFiles,record.layoutTzFiles);
+    set(form.sandingSelect,record.sanding?'yes':'no');
+    if(record.calibration?.enabled){set(form.calibrationSelect,'yes');set(form.calibrationTargetInput,record.calibration.baseThicknessAfterCalibrationMm,'input');}
+    form.sizeRows.innerHTML='';positionFinishState.clear();positionEdgeState.clear();
+    (record.sizes||[]).forEach(size=>{
+      const row=addSizeRow(size);$('[data-size-transition]',row).checked=!!size.transition;
+      $('[data-size-comment]',row).value=size.comment||'';files($('[data-size-files]',row),size.files);
+      updateSizeTransitionUI(row);
+    });
+    const finish=record.finishParameters||{};
+    let finishId=finish.finishId;
+    if(finishId==='lacquer')finishId=finish.lacquerType==='polyurethane'?'lacquer_polyurethane':'lacquer_acrylic';
+    set(form.finishSelect,finishId||'none');set(form.lacquerExecutionSelect,finish.lacquerExecution);
+    set(form.finishSidesSelect,finish.sides);set(form.lacquerGlossSelect,finish.lacquerGloss);
+    set(form.lacquerProcessSelect,finish.lacquerProcess);set(form.enamelVariantSelect,finish.enamelVariant);
+    set(form.toningSelect,finish.toning);set(form.isolatorSelect,finish.isolator);
+    const rows=Array.from(form.sizeRows.querySelectorAll('[data-size-row]'));
+    (record.finishByPosition||[]).forEach(item=>{const row=rows[item.position-1];if(row){const normalized=normalizeFinishConfig(item,{allowInherit:true}),global=currentGlobalFinishConfig();if(item.source==='position'||Object.keys(global).some(key=>normalized[key]!==global[key]))positionFinishState.set(row.dataset.rowId,normalized);}});
+    positionFinishOverridesEnabled=positionFinishState.size>0;
+    if(positionFinishOverridesEnabled){form.positionFinishOverrides.classList.remove('is-hidden');renderPositionFinishOverrides(false);}
+    const edge=record.edge||{mode:'none'};set(form.edgeModeSelect,edge.mode);
+    if(edge.mode!=='none'){
+      const which=edge.mode==='separate'?'separate':'attached',controls=edgeControls(which);
+      set(which==='separate'?form.separateEdgeSidesSelect:form.edgeSidesSelect,edge.sidesId);
+      set(controls.typeSelect,edge.typeId);
+      set(controls.materialInput,edge.veneerName||edge.name||edge.displayName,'input');
+      set(controls.thicknessSelect,edge.thicknessMm);syncEdgeThicknessOptions(which,{preserve:true});syncEdgeWidthOptions(which,{preserve:true});
+      set(controls.widthSelect,edge.widthMm);set(controls.orderWidthInput,edge.widthMm,'input');
+      if(edge.mode==='separate'&&(edge.manuallyAdjusted||edge.metersSource==='manual'))set(form.separateEdgeMetersInput,edge.orderedMeters??edge.meters,'input');
+      if(edge.mode==='attached'){
+        (edge.positionSettings||[]).forEach(item=>{const row=rows[item.position-1];if(row)positionEdgeState.set(row.dataset.rowId,{mode:item.mode||'inherit',sidesId:item.sidesId,thicknessMm:item.thicknessMm,widthMm:item.widthMm});});
+        positionEdgeOverridesEnabled=(edge.positionSettings||[]).some(item=>item.mode&&item.mode!=='inherit');
+        if(positionEdgeOverridesEnabled)renderPositionEdgeOverrides(false);
+      }
+      set(form.edgeBevelSelect,edge.bevel?'yes':'no');set(form.edgeCommentInput,edge.comment||'','input');
+    }
+    const condition=record.clientCondition||record.pricing?.clientConditionSelected;
+    set(form.clientConditionSelect,condition);
+    Object.entries(record.pricing?.veneer||{}).forEach(([side,items])=>{const item=items[0];if(item?.condition?.selectedConditionId)veneerConditionChoices[side]=item.condition.selectedConditionId;});
+    set(form.commentInput,record.comment||'','input');files(form.filesInput,record.files);
+    form.root.querySelectorAll('input[type=file]').forEach(input=>{const output=input.id==='filesInput'?form.selectedFiles:input.id==='layoutTzFiles'?form.layoutTzFileNames:input.closest('[data-size-row]')?.querySelector('[data-size-file-names]');if(output)renderUploadedFiles(input,output,true);});
+    recalc();
+    (record.veneerConsumptions||record.pricing?.veneerConsumptions||[]).filter(saved=>saved.actualVeneerAreaManual).forEach(saved=>{
+      const current=(lastCalculation.veneerConsumptions||[]).find(item=>item.materialId===saved.materialId&&(item.sideKey||item.which)===saved.side&&item.pricingMode===saved.pricingMode&&(!saved.panelSize||item.panelSize?.length===saved.panelSize.lengthMm&&item.panelSize?.width===saved.panelSize.widthMm));
+      if(current&&Number.isFinite(saved.actualVeneerAreaM2))priceAdjustmentOverrides.set(current.id,saved.actualVeneerAreaM2);
+    });
+    if(record.pricing?.mixMatchVeneer?.actualVeneerAreaManual)priceAdjustmentOverrides.set('mixmatch:actualVeneerAreaM2',record.pricing.mixMatchVeneer.actualVeneerAreaM2);
+    if(record.pricing?.thickVeneerWork?.changedManually&&lastCalculation.thickVeneerWorkAdjustment?.id)priceAdjustmentOverrides.set(lastCalculation.thickVeneerWorkAdjustment.id,record.pricing.thickVeneerWork.actualCoefficient);
+    Array.from(form.sizeRows.querySelectorAll('[data-size-row]')).forEach((row,index)=>{
+      const quote=record.sizes?.[index]?.productionCost||record.productionCosts?.find(item=>item.position===index+1);
+      const input=row.querySelector('[data-size-production-price]');
+      if(input){input.value="";delete row.dataset.productionSignature;}
+    });
+    recalc();
+  }
+  window.WoodstockPanelsController = {
+    restoreRecord: restoreSpecificationRecord,
+    exportState: exportSpecificationState,
+    restoreState: restoreSpecificationState,
+    modifyRow: modifySpecificationRow,
+    isolateRow: isolateSpecificationRow,
+    form,
+    result: () => lastCalculation,
+    recalculate: recalc,
+    capture: () => saveToSpecification({ capture: true }),
+    issues: () => currentBlockingValidationIssues(lastCalculation),
+    customSize: setCustomSizeMode,
+    resetBase: updateBaseUI,
+    ready: init()
+  };
 })();
