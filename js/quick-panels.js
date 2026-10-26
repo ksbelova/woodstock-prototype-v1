@@ -31,6 +31,14 @@
  function render(result){
   if(syncing)return;
   const form=api.form;
+  if(wall&&$('quickVeneeredSides')) $('quickVeneeredSides').textContent=form.veneerThicknessSelect.value ? (Number(form.veneeredSidesSelect.value)===2?'с двух сторон':'с одной стороны') : '—';
+  if(wall&&$('quickReverseSide')) {
+   const thickness=Number(form.veneerThicknessSelect.value);
+   const two=Number(form.veneeredSidesSelect.value)===2;
+   $('quickReverseSide').textContent=!form.veneerThicknessSelect.value?'—':two
+    ? (Math.abs(thickness-2.5)<0.001?'шпон ясеня 2,5 мм':'шпон той же породы, 2 мм')
+    : form.reverseSideSelect.value==='paper'?'бумага':'черновой шпон';
+  }
   const certified=wall&&result?.base?.id==='gsp';
   if(certified!==certifiedState){
    certifiedState=certified;syncing=true;
@@ -40,6 +48,21 @@
    form.finishSelect.dispatchEvent(new Event('change',{bubbles:true}));form.edgeModeSelect.dispatchEvent(new Event('change',{bubbles:true}));
    syncing=false;result=api.result();
   }
+  if(wall&&$('quickFinishExplanation')) {
+   const descriptions={
+    lacquer_acrylic:'Прозрачное покрытие на водной основе, сохраняет рисунок и цвет шпона, подходит для стен и мебели без высокой нагрузки.',
+    lacquer_polyurethane:'Прозрачное покрытие повышенной прочности, лучше переносит частые прикосновения и влажную уборку, подходит для коридоров, холлов и общественных помещений.',
+    enamel:'Непрозрачное цветное покрытие, перекрывает рисунок шпона, но сохраняет его фактуру.'
+   };
+   const text=descriptions[form.finishSelect.value]||'';
+   $('quickFinishExplanation').textContent=text;
+   $('quickFinishExplanation').classList.toggle('is-hidden',!text);
+  }
+  if((wall||scenario==='details')&&$('quickToningField')) {
+   const lacquer=['lacquer_acrylic','lacquer_polyurethane'].includes(form.finishSelect.value);
+   $('quickToningField').classList.toggle('is-hidden',!lacquer);
+   $('quickToningCheckbox').checked=lacquer&&form.toningSelect.value==='yes';
+  }
   // The short scenario selects the documented finish process, then the existing controller prices it.
   const process=form.finishSelect.value==='lacquer_acrylic'&&form.lacquerProcessSelect.value===''?'primer_lacquer':null;
   if(process&&[...form.lacquerProcessSelect.options].some(o=>o.value===process)){
@@ -48,12 +71,17 @@
   if(form.finishSelect.value==='enamel'&&!form.enamelVariantSelect.value){syncing=true;form.enamelVariantSelect.value='Грунт + эмаль';api.recalculate();syncing=false;result=api.result();}
   const ready=!!result?.base&&!!result.validSizes?.length&&!api.issues().length&&(standard||certified||!!form.finishSelect.value);
   const boring=$('boringSelect')?.value==='yes';
-  const partial=ready&&(!result.priceCalculationComplete||boring);
-  $('resultTotal').textContent=!ready?'—':partial?(result.finalTotal>0?money(result.finalTotal)+' *':'Стоимость рассчитает менеджер'):money(result.finalTotal);
+  const hasKnownPrice=Number.isFinite(result?.finalTotal)&&result.finalTotal>0;
+  const partial=(hasKnownPrice||ready)&&(!ready||!result.priceCalculationComplete||boring);
+  $('resultTotal').textContent=!hasKnownPrice&&!ready?'—':partial?(hasKnownPrice?money(result.finalTotal)+' *':'Стоимость рассчитает менеджер'):money(result.finalTotal);
   $('priceLabel').textContent=partial?'Стоимость рассчитанной части с НДС':'Ориентировочная стоимость с НДС';
   $('partialWarning').classList.toggle('is-hidden',!partial);
   $('partialWarning').textContent=partial?'Расчёт неполный. '+[...(result.warnings||[]),...(boring?['Присадка: стоимость определяет производство.']:[])].join(' '):'';
   $('quickArea').textContent=result?.base&&result.totalArea>0?number(result.totalArea)+' м²':'—';
+  if((wall||standard)&&$('quickEdgeWidth')) {
+   const width=result?.edge?.widthMm;
+   $('quickEdgeWidth').textContent=result?.edge?.mode===(standard?'separate':'attached')&&Number.isFinite(width)&&width>0?number(width)+' мм':'—';
+  }
  }
  function productDocument(record,result){
   const side=(material,pattern)=>material?[`${material.name||'—'} · ${number(material.thicknessMm)} мм`,pattern].filter(Boolean).join(' · '):record.sideB||'—';
@@ -75,8 +103,8 @@
    const classification=standard&&['warehouse_standard','standard_request'].includes(row.classificationId)?row.classificationName:'';
    return [
    String(row.position),[record.title,classification].filter(Boolean).join('\n'),
-   `А: ${side(record.materialSides.A,record.veneerCut)}\nБ / оборот: ${record.sides===2?side(record.materialSides.B,record.veneerBCut):record.sideB}\nФанеровка: ${record.sides} ст.`,
-   `А: ${record.layout}\nБ: ${record.layoutB||'—'}\n${certified?'Покрытие по сертификату КМ1 (уточняет производство)':record.finishByPosition.find(x=>x.position===row.position)?.summary||record.finish}\nКромка: ${edgeForPosition(row)}\nПереход рисунка: ${row.transition?'да':'нет'}${row.comment?'\nКомментарий: '+row.comment:''}${$('boringSelect')?.value==='yes'?'\nПрисадка: по чертежу':''}`,
+   `А: ${side(record.materialSides.A,record.veneerCut)}\nБ / оборот: ${record.sides===2?side(record.materialSides.B,record.veneerBCut):record.sideB}\nШпон: ${Number(record.sides)===2?'с двух сторон':'с одной стороны'}`,
+   `А: ${record.layout}\nБ: ${record.layoutB||'—'}\n${certified?'Покрытие по сертификату КМ1 (уточняет производство)':record.finishByPosition.find(x=>x.position===row.position)?.summary||record.finish}\nКромка: ${edgeForPosition(row)}${row.comment?'\nКомментарий: '+row.comment:''}${$('boringSelect')?.value==='yes'?'\nПрисадка: по чертежу':''}`,
    `${row.length} × ${row.width}`,String(row.quantity),number(row.area),
    `${value(row.knownPricePerPiece)} / шт.\n${value(row.knownPricePerM2)} / м²`,value(row.knownSubtotal)
   ];});
@@ -95,6 +123,7 @@
   if(edge.mode!=='none')notes.push({text:'Кромка — данные отдельной спецификации',style:'sectionTitle'},{text:edgeText,style:'infoSmall'});
   const files=[...new Set([...contact.fileNames(),...(record.layoutTzFiles||[]),...record.sizes.flatMap(row=>row.files||[])])];
   if(record.layoutTzComment)notes.push({text:'Требования к раскладке: '+record.layoutTzComment,style:'infoText'});
+  if(wall||scenario==='details') notes.push({text:(wall?'Переход рисунка на панелях: ':'Переход рисунка на деталях: ')+(record.patternTransitionRequested?'да':'нет'),style:'infoText'});
   notes.push({text:'Дополнительные требования',style:'sectionTitle'},{text:record.comment||'—',style:'infoText'},{text:'Файлы: '+(files.join(', ')||'нет'),style:'infoSmall'},{text:'Связь с менеджером: '+($('managerContactInput').checked?'нужна':'не запрошена'),style:'infoSmall'});
   return {dontBreakRows:false,title,numberPrefix:'КР-ПЛ-',subtitle:'Краткий расчёт плит',widths:[12,52,110,103,57,24,38,65,65],header:['№','Основа','Шпон','Раскладка и обработка','Размер, мм','Шт.','Площадь, м²','Цена с НДС','Сумма с НДС'].map(text=>({text,style:'tableHeader'})),rows,afterPrice:notes};
  }
@@ -120,6 +149,7 @@
   if(scenario==='details'&&$('boringSelect').value==='yes'&&!contact.fileNames().length){$('saveStatus').textContent='Для присадки приложите чертёж.';return;}
   // This is the detailed calculation's own validation and serialization, without writing a specification item.
   const record=api.capture();if(!record)return;
+  if(wall||scenario==='details') record.patternTransitionRequested=Boolean($('quickPatternTransition')?.checked);
   const result=api.result();
   if($('boringSelect')?.value==='yes')record.sizes.forEach(row=>{row.pricingPartial=true;row.pricingComplete=false;row.total=null;row.pricePerM2=null;row.pricePerPiece=null;row.pendingCosts=[...(row.pendingCosts||[]),'Присадка: стоимость производства'];});
   const f=contactForm(),partial=!result.priceCalculationComplete||$('boringSelect')?.value==='yes';
@@ -135,6 +165,10 @@
   contact=Common.createContact({form:f,ui,submitted:()=>submitted,renderAll:()=>api.recalculate()});contact.bind();
   f.files.addEventListener('change',()=>api.recalculate());
   $('getCalculationButton').addEventListener('click',submit);
+  if(wall||scenario==='details') $('quickToningCheckbox')?.addEventListener('change',()=>{
+   api.form.toningSelect.value=['lacquer_acrylic','lacquer_polyurethane'].includes(api.form.finishSelect.value)&&$('quickToningCheckbox').checked?'yes':'no';
+   api.form.toningSelect.dispatchEvent(new Event('change',{bubbles:true}));
+  });
   $('downloadModalClose').addEventListener('click',()=>Common.closeDownloadModal($('downloadModal')));
   $('downloadModal').addEventListener('click',event=>{if(event.target===$('downloadModal'))Common.closeDownloadModal($('downloadModal'));});
   api.form.root.addEventListener('submit',event=>{event.preventDefault();submit();});
@@ -142,7 +176,7 @@
   if(standard)api.form.finishSelect.value='none';
   else{
    api.form.finishSelect.querySelector('option[value="none"]')?.remove();api.form.finishSelect.add(new Option('Выберите покрытие',''),0);api.form.finishSelect.value='';
-   const prepareRows=()=>{document.querySelectorAll('[data-size-row]').forEach(row=>{if(!row.dataset.sizeMode)api.customSize(row);});};
+   const prepareRows=()=>{document.querySelectorAll('[data-size-row]').forEach(row=>{if(!row.dataset.sizeMode)api.customSize(row,{focus:false});});};
    prepareRows();new MutationObserver(prepareRows).observe(api.form.sizeRows,{childList:true});
   }
   // These are the existing detailed fields, hidden for the shortened client scenario.

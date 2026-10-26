@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Фасады и детали в размер — Woodstock</title><link rel="stylesheet" href="../../css/main.css"><style>
+<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Фасады и детали по вашим размерам — Woodstock</title><link rel="stylesheet" href="../../css/main.css"><style>
 .quick-panels-page [data-quick-hidden],.quick-panels-page #priceAdjustmentsBlock,.quick-panels-page [data-size-manufacturing-field],.quick-panels-page #positionFinishOverrides,.quick-panels-page #positionEdgeOverrides,.quick-panels-page #edgeCostSummary,.quick-panels-page #separateEdgeCostSummary {display:none!important}
 .quick-panels-page .tech-operations-list .dynamic-adjustment-row__right {display:none}
 .quick-panels-page [data-hide-commercial] {display:none!important}
@@ -8,7 +8,8 @@ body:not([data-panel-scenario="standard"]) [data-standard-size-values],body:not(
 .quick-panels-page .tech-operations-list .dynamic-adjustment-row:not(:has(#sandingSelect)) {display:none}
 .quick-panels-page .size-row:not(:has([data-size-transition]:checked)) [data-size-details] {display:none}
 body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
-</style></head><body class="quick-panels-page" data-panel-scenario="details"><main class="start-page calc-page plate-page"><header class="page-head calc-head"><div class="page-head__content"><p class="kicker">WOODSTOCK · Краткий расчёт</p><h1>Фасады и детали в размер</h1><p class="lead">Укажите параметры изделия, чтобы получить предварительный расчёт.</p></div><a class="back-link" href="./panels.html">Назад</a></header><section class="calc-layout">      <form class="calc-form" id="panelForm" novalidate>
+body[data-panel-scenario="details"] [data-size-extra] {display:none!important}
+</style></head><body class="quick-panels-page" data-panel-scenario="details"><main class="start-page calc-page plate-page"><header class="page-head calc-head"><div class="page-head__content"><p class="kicker">WOODSTOCK · Краткий расчёт</p><h1>Фасады и детали по вашим размерам</h1><p class="lead">Укажите параметры изделия, чтобы получить предварительный расчёт.</p></div><a class="back-link" href="./panels.html">Назад</a></header><section class="calc-layout">      <form class="calc-form" id="panelForm" novalidate>
         <section class="form-block">
           <h2>Основа</h2>
           <div class="field-grid field-grid--two">
@@ -30,7 +31,7 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
         </section>
 
         <section class="form-block">
-          <h2>Фанеровка</h2>
+          <h2>Шпон</h2>
 
           <div class="field-grid field-grid--two">
             <label class="field" id="veneerTypeField">
@@ -41,7 +42,7 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
             </label>
 
             <div class="field autocomplete-field" id="veneerAField">
-              <label class="field__label" id="veneerAInputLabel" for="veneerAInput">Наименование шпона</label>
+              <label class="field__label" id="veneerAInputLabel" for="veneerAInput">Порода</label>
               <div class="autocomplete-control">
                 <input id="veneerAInput" type="text" autocomplete="off" placeholder="Введите наименование шпона" aria-controls="veneerASuggestions" aria-expanded="false" />
                 <button class="autocomplete-clear is-hidden" id="veneerAClear" type="button" aria-label="Очистить материал стороны А">×</button>
@@ -53,16 +54,17 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
 
           <div class="field-grid field-grid--two is-hidden" id="veneerSelectionDetailsGrid">
             <label class="field is-hidden" id="veneerThicknessField">
-              <span class="field__label">Толщина лицевого шпона</span>
+              <span class="field__label">Лицевой слой</span>
               <select id="veneerThicknessSelect"></select>
               <span class="field__error" id="veneerThicknessError"></span>
+              <span class="field__note is-hidden" id="quickPaperBackHint" aria-live="polite"></span>
             </label>
 
             <label class="field is-hidden" id="veneeredSidesField">
-              <span class="field__label">Количество фанерованных сторон</span>
+              <span class="field__label">Шпон</span>
               <select id="veneeredSidesSelect">
-                <option value="1">1 сторона</option>
-                <option value="2">2 стороны</option>
+                <option value="1">с одной стороны</option>
+                <option value="2">с двух сторон</option>
               </select>
             </label>
           </div>
@@ -115,14 +117,14 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
               <span class="field__error" id="veneerCutError"></span>
             </label>
             <label class="field is-hidden" id="layoutField">
-              <span class="field__label">Раскладка / рисунок шпона — сторона А</span>
+              <span class="field__label">Раскладка, сторона А</span>
               <select id="layoutSelect"><option value="">Выберите раскладку</option></select>
               <span class="field__error" id="layoutError"></span>
             </label>
           </div>
 
           <label class="field is-hidden" id="layoutBField">
-            <span class="field__label">Раскладка / рисунок шпона — сторона Б</span>
+            <span class="field__label">Раскладка, сторона Б</span>
             <select id="layoutBSelect"><option value="">Как на стороне А</option></select>
           </label>
 
@@ -149,6 +151,7 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
 
         <section class="form-block">
           <h2>Размер и количество</h2>
+          <label class="toggle-line"><input id="quickPatternTransition" type="checkbox" /><span>Нужен переход рисунка на деталях?</span></label>
           <div class="size-rows" id="sizeRows"></div>
           <p class="field__error is-hidden" id="sizeBlockError"></p>
           <button class="secondary-button add-size-row-button" id="addSizeRowBtn" type="button">Добавить ещё позицию</button>
@@ -322,7 +325,7 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
           </div>
           <div class="dynamic-adjustments tech-operations-list">
             <div class="dynamic-adjustment-row">
-              <div class="dynamic-adjustment-row__label"><strong>Фанеровка</strong></div>
+              <div class="dynamic-adjustment-row__label"><strong>Шпон</strong></div>
               <div class="dynamic-adjustment-row__right"><strong id="techVeneeringSummary">—</strong></div>
             </div>
             <div class="dynamic-adjustment-row">
@@ -349,6 +352,14 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
           <label class="field">
             <span class="field__label">Финишное покрытие</span>
             <select id="finishSelect"></select>
+          </label>
+
+          <label class="field is-hidden" id="quickToningField">
+            <span class="toggle-line">
+              <input id="quickToningCheckbox" type="checkbox" />
+              <span>Нужна тонировка изделия?</span>
+            </span>
+            <span class="field__note">Тонировка меняет оттенок шпона под нужный цвет и сохраняет его рисунок. Подбираем по образцу, цвет согласуем с вами до запуска производства</span>
           </label>
 
           <div class="conditional-block is-hidden" id="finishParameterFields">
@@ -449,7 +460,7 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
           -->
         </section>
 
-        <section class="form-block"><h2>Дополнительные операции</h2><label class="field"><span class="field__label">Присадка</span><select id="boringSelect"><option value="no">Не требуется</option><option value="yes">Требуется, по чертежу</option></select></label></section><section class="form-block" id="contactBlock">
+        <section class="form-block"><h2>Дополнительные операции</h2><label class="field"><span class="field__label">Нужны присадки под петли и/или ручки?</span><select id="boringSelect"><option value="no">Нет</option><option value="yes">Да</option></select><span class="field__note">Присадкой называют отверстия под петли диаметром 35 мм и под ручки. Для присадки понадобится чертёж</span></label></section><section class="form-block" id="contactBlock">
           <h2>Контактная информация</h2>
 
           <div class="field-grid field-grid--two">
@@ -542,7 +553,7 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
         </section>
       </form>
 
-<aside class="spec-panel"><div class="spec-panel__inner"><p class="kicker">Ориентировочный расчёт</p><h2 class="spec-title">Фасады и детали в размер</h2><div class="area-summary"><span class="area-summary__label">Общий метраж</span><strong id="quickArea">—</strong></div><div class="total-box"><span id="priceLabel">Ориентировочная стоимость с НДС</span><strong id="resultTotal">—</strong></div><p class="field-warning is-hidden" id="partialWarning"></p><button class="next-step-button" id="getCalculationButton" type="button">Скачать спецификацию и расчёт в PDF</button><p class="save-status" id="saveStatus" aria-live="polite"></p></div></aside></section>      <aside class="is-hidden">
+<aside class="spec-panel"><div class="spec-panel__inner"><p class="kicker">Ориентировочный расчёт</p><h2 class="spec-title">Фасады и детали по вашим размерам</h2><div class="area-summary"><span class="area-summary__label">Общий метраж</span><strong id="quickArea">—</strong></div><div class="total-box"><span id="priceLabel">Ориентировочная стоимость с НДС</span><strong id="resultTotal">—</strong></div><p class="field-warning is-hidden" id="partialWarning"></p><button class="next-step-button" id="getCalculationButton" type="button">Скачать спецификацию и расчёт в PDF</button><p class="save-status" id="saveStatus" aria-live="polite"></p></div></aside></section>      <aside class="is-hidden">
         <div class="spec-panel__inner">
           <p class="kicker">Расчёт позиции</p>
           <h2 class="spec-title">Плитные материалы и изделия</h2>

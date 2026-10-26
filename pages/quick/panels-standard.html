@@ -8,6 +8,7 @@ body:not([data-panel-scenario="standard"]) [data-standard-size-values],body:not(
 .quick-panels-page .tech-operations-list .dynamic-adjustment-row:not(:has(#sandingSelect)) {display:none}
 .quick-panels-page .size-row:not(:has([data-size-transition]:checked)) [data-size-details] {display:none}
 body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
+body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
 </style></head><body class="quick-panels-page" data-panel-scenario="standard"><main class="start-page calc-page plate-page"><header class="page-head calc-head"><div class="page-head__content"><p class="kicker">WOODSTOCK · Краткий расчёт</p><h1>Плита стандартного формата</h1><p class="lead">Укажите параметры изделия, чтобы получить предварительный расчёт.</p></div><a class="back-link" href="./panels.html">Назад</a></header><section class="calc-layout">      <form class="calc-form" id="panelForm" novalidate>
         <section class="form-block">
           <h2>Основа</h2>
@@ -30,7 +31,7 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
         </section>
 
         <section class="form-block">
-          <h2>Фанеровка</h2>
+          <h2>Шпон</h2>
 
           <div class="field-grid field-grid--two">
             <label class="field" id="veneerTypeField">
@@ -41,7 +42,7 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
             </label>
 
             <div class="field autocomplete-field" id="veneerAField">
-              <label class="field__label" id="veneerAInputLabel" for="veneerAInput">Наименование шпона</label>
+              <label class="field__label" id="veneerAInputLabel" for="veneerAInput">Порода</label>
               <div class="autocomplete-control">
                 <input id="veneerAInput" type="text" autocomplete="off" placeholder="Введите наименование шпона" aria-controls="veneerASuggestions" aria-expanded="false" />
                 <button class="autocomplete-clear is-hidden" id="veneerAClear" type="button" aria-label="Очистить материал стороны А">×</button>
@@ -53,16 +54,17 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
 
           <div class="field-grid field-grid--two is-hidden" id="veneerSelectionDetailsGrid">
             <label class="field is-hidden" id="veneerThicknessField">
-              <span class="field__label">Толщина лицевого шпона</span>
+              <span class="field__label">Лицевой слой</span>
               <select id="veneerThicknessSelect"></select>
               <span class="field__error" id="veneerThicknessError"></span>
+              <span class="field__note is-hidden" id="quickPaperBackHint" aria-live="polite"></span>
             </label>
 
             <label class="field is-hidden" id="veneeredSidesField">
-              <span class="field__label">Количество фанерованных сторон</span>
+              <span class="field__label">Шпон</span>
               <select id="veneeredSidesSelect">
-                <option value="1">1 сторона</option>
-                <option value="2">2 стороны</option>
+                <option value="1">с одной стороны</option>
+                <option value="2">с двух сторон</option>
               </select>
             </label>
           </div>
@@ -115,14 +117,14 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
               <span class="field__error" id="veneerCutError"></span>
             </label>
             <label class="field is-hidden" id="layoutField">
-              <span class="field__label">Раскладка / рисунок шпона — сторона А</span>
+              <span class="field__label">Раскладка, сторона А</span>
               <select id="layoutSelect"><option value="">Выберите раскладку</option></select>
               <span class="field__error" id="layoutError"></span>
             </label>
           </div>
 
           <label class="field is-hidden" id="layoutBField">
-            <span class="field__label">Раскладка / рисунок шпона — сторона Б</span>
+            <span class="field__label">Раскладка, сторона Б</span>
             <select id="layoutBSelect"><option value="">Как на стороне А</option></select>
           </label>
 
@@ -157,11 +159,11 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
         <section class="form-block">
           <h2>Кромка</h2>
           <label class="field">
-            <span class="field__label">Кромка</span>
+            <span class="field__label">Кромка потребуется?</span>
             <select id="edgeModeSelect">
-              <option value="none">Не нужна</option>
+              <option value="none">Нет</option>
               
-              <option value="separate">Кромка отдельно</option>
+              <option value="separate">Да</option>
             </select>
           </label>
 
@@ -235,7 +237,7 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
           </div>
 
           <div class="conditional-block is-hidden" id="separateEdgeFields">
-            <label class="field"><span class="field__label">Торцы для расчёта метража</span><select id="separateEdgeSidesSelect"></select></label>
+            <label class="field" data-quick-hidden><span class="field__label">Торцы для расчёта метража</span><select id="separateEdgeSidesSelect"></select></label>
             <div class="field-grid field-grid--two">
               <label class="field">
                 <span class="field__label">Тип кромки</span>
@@ -245,10 +247,10 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
               </label>
               <label class="field">
                 <span class="field__label">Метраж к заказу, пог. м</span>
-                <input id="separateEdgeMetersInput" type="number" min="0.1" step="0.1" inputmode="decimal" />
+                <input id="separateEdgeMetersInput" type="number" min="50" step="0.1" inputmode="decimal" />
                 <span class="field__note" id="separateEdgeCostSummary">—</span>
-                <span class="field__note" id="separateEdgeMetersSummary">Рассчитывается по размерам и количеству деталей; можно изменить вручную.</span>
-                <button class="secondary-button is-hidden" id="separateEdgeMetersReset" type="button">Вернуть автоматический метраж</button>
+                <span class="field__note" id="separateEdgeMetersSummary">Минимальный заказ кромки 50 пог. м</span>
+                <button class="secondary-button is-hidden" id="separateEdgeMetersReset" data-quick-hidden type="button">Вернуть автоматический метраж</button>
                 <span class="field__error" id="separateEdgeMetersError"></span>
                 <span class="field__note is-hidden" id="separateEdgeMetersWarning"></span>
               </label>
@@ -275,13 +277,13 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
             </div>
 
             <div class="field-grid field-grid--two">
-              <label class="field" id="separateEdgeWidthField">
+              <label class="field" id="separateEdgeWidthField" data-quick-hidden>
                 <span class="field__label">Ширина кромки, мм</span>
                 <select id="separateEdgeWidthSelect" disabled>
                   <option value="">Выберите позицию кромки</option>
                 </select>
               </label>
-              <label class="field is-hidden" id="separateEdgeOrderWidthField">
+              <label class="field is-hidden" id="separateEdgeOrderWidthField" data-quick-hidden>
                 <span class="field__label">Ширина кромки, мм</span>
                 <input id="separateEdgeOrderWidthInput" type="number" min="1" step="1" inputmode="decimal" />
                 <span class="field__note">Предложена ширина по толщине детали; можно изменить. Цена заказной кромки требует согласования.</span>
@@ -322,7 +324,7 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
           </div>
           <div class="dynamic-adjustments tech-operations-list">
             <div class="dynamic-adjustment-row">
-              <div class="dynamic-adjustment-row__label"><strong>Фанеровка</strong></div>
+              <div class="dynamic-adjustment-row__label"><strong>Шпон</strong></div>
               <div class="dynamic-adjustment-row__right"><strong id="techVeneeringSummary">—</strong></div>
             </div>
             <div class="dynamic-adjustment-row">
@@ -542,7 +544,7 @@ body:not([data-panel-scenario="standard"]) .standard-size-list {display:none}
         </section>
       </form>
 
-<aside class="spec-panel"><div class="spec-panel__inner"><p class="kicker">Ориентировочный расчёт</p><h2 class="spec-title">Плита стандартного формата</h2><div class="area-summary"><span class="area-summary__label">Общий метраж</span><strong id="quickArea">—</strong></div><div class="total-box"><span id="priceLabel">Ориентировочная стоимость с НДС</span><strong id="resultTotal">—</strong></div><p class="field-warning is-hidden" id="partialWarning"></p><button class="next-step-button" id="getCalculationButton" type="button">Скачать спецификацию и расчёт в PDF</button><p class="save-status" id="saveStatus" aria-live="polite"></p></div></aside></section>      <aside class="is-hidden">
+<aside class="spec-panel"><div class="spec-panel__inner"><p class="kicker">Ориентировочный расчёт</p><h2 class="spec-title">Плита стандартного формата</h2><dl class="spec-list spec-list--full"><div><dt>Ширина кромки</dt><dd id="quickEdgeWidth">—</dd></div></dl><div class="area-summary"><span class="area-summary__label">Общий метраж</span><strong id="quickArea">—</strong></div><div class="total-box"><span id="priceLabel">Ориентировочная стоимость с НДС</span><strong id="resultTotal">—</strong></div><p class="field-warning is-hidden" id="partialWarning"></p><button class="next-step-button" id="getCalculationButton" type="button">Скачать спецификацию и расчёт в PDF</button><p class="save-status" id="saveStatus" aria-live="polite"></p></div></aside></section>      <aside class="is-hidden">
         <div class="spec-panel__inner">
           <p class="kicker">Расчёт позиции</p>
           <h2 class="spec-title">Плитные материалы и изделия</h2>

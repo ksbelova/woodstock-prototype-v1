@@ -426,7 +426,119 @@
     return isLacquerFinish(id);
   }
 
+  function isQuickDetailsPanel() {
+    return document.body.classList.contains("quick-panels-page") && document.body.dataset.panelScenario === "details";
+  }
+
+  let quickPaperBackResetHint = "";
+
+  function syncQuickPaperBack() {
+    if (!isQuickStandardPanel() && !isQuickDetailsPanel()) return;
+    const thickness = selectedVeneerThickness();
+    const base = parseThicknessComposition(currentBaseThicknessRaw()).total;
+    const faceReady = faceMaterialSelectionReady();
+    const paperAllowed = faceReady && Math.abs(thickness - 0.6) < 0.001 && Number.isFinite(base) && base > 0 && base <= 10;
+    if (paperAllowed || !faceReady) quickPaperBackResetHint = "";
+    if (!paperAllowed && form.reverseSideSelect.value === "paper") {
+      form.reverseSideSelect.value = "rough";
+      quickPaperBackResetHint = "Бумага возможна только с лицевым слоем 0,6 мм и основой до 10 мм";
+    }
+    const paperOption = form.reverseSideSelect.querySelector('option[value="paper"]');
+    if (paperOption) {
+      paperOption.hidden = !paperAllowed;
+      paperOption.disabled = !paperAllowed;
+    }
+    const selectable = paperAllowed && Number(form.veneeredSidesSelect.value) === 1;
+    form.reverseSideField.classList.toggle("is-hidden", !selectable);
+    form.veneerSideBGrid.classList.toggle("is-hidden", !selectable);
+    const hint = el("quickPaperBackHint");
+    if (hint) {
+      hint.textContent = quickPaperBackResetHint;
+      hint.classList.toggle("is-hidden", !quickPaperBackResetHint);
+    }
+  }
+
+  function isQuickStandardPanel() {
+    return document.body.classList.contains("quick-panels-page") && document.body.dataset.panelScenario === "standard";
+  }
+
+  function twoSidedVeneerRequirementMessage() {
+    return document.body.classList.contains("quick-panels-page")
+      ? "Шпон толщиной 1,5 мм и более требует шпона с двух сторон."
+      : "Шпон толщиной 1,5 мм и более требует двух фанерованных сторон.";
+  }
+
+  function isQuickWallPanel() {
+    return document.body.classList.contains("quick-panels-page") && document.body.dataset.panelScenario === "wall";
+  }
+
+  function requiresTwoFaceSides(thickness) {
+    return isQuickWallPanel() ? Number.isFinite(thickness) && thickness >= 2 - 0.001 : isAtLeastOnePointFive(thickness);
+  }
+
+  let quickWallPaperResetHint = "";
+
+  function syncQuickWallBack() {
+    if (!isQuickWallPanel()) return;
+    const thickness = selectedVeneerThickness();
+    const faceReady = faceMaterialSelectionReady();
+    const two = requiresTwoFaceSides(thickness);
+    const backExplanation = el("quickWallBackExplanation");
+    if (backExplanation) {
+      const thin = faceReady && [0.6, 1, 1.5].some(value => Math.abs(thickness - value) < 0.001);
+      const thick = faceReady && [2, 2.5].some(value => Math.abs(thickness - value) < 0.001);
+      backExplanation.textContent = thin
+        ? "Обратная сторона панели закрывается черновым шпоном. Это шпон невысокого качества любой породы. После монтажа он не виден и нужен, чтобы панель не повело"
+        : thick
+          ? "На обратную сторону клеится более доступный шпон той же толщины, чтобы панель не повело. Он не покрывается лаком и после монтажа не виден"
+          : "";
+      backExplanation.classList.toggle("is-hidden", !thin && !thick);
+    }
+    const paperAllowed = faceReady && Math.abs(thickness - 0.6) < 0.001
+      && Math.abs(parseThicknessComposition(currentBaseThicknessRaw()).total - 10) < 0.001;
+    form.veneeredSidesSelect.value = two ? "2" : "1";
+    form.veneeredSidesSelect.disabled = true;
+    form.veneeredSidesField.setAttribute("data-quick-hidden", "");
+    if (paperAllowed || !faceReady) quickWallPaperResetHint = "";
+    if (!paperAllowed && form.reverseSideSelect.value === "paper") {
+      quickWallPaperResetHint = thickness >= 1 - 0.001
+        ? "Бумага возможна только с лицевым слоем 0,6 мм"
+        : "Бумага возможна только на основе 10 мм";
+    }
+    if (!paperAllowed) form.reverseSideSelect.value = "rough";
+    const paperHint = el("quickWallPaperHint");
+    if (paperHint) {
+      paperHint.textContent = quickWallPaperResetHint;
+      paperHint.classList.toggle("is-hidden", !quickWallPaperResetHint);
+    }
+    form.reverseSideField.classList.toggle("is-hidden", !paperAllowed);
+    form.veneerSideBGrid.classList.toggle("is-hidden", !paperAllowed);
+    form.veneerBFields.setAttribute("data-quick-hidden", "");
+    form.layoutBField?.setAttribute("data-quick-hidden", "");
+    if (two && Math.abs(thickness - 2.5) < 0.001) {
+      const variants = (data?.veneers || []).filter(item => item.type === "natural"
+        && item.group === "ЯСЕНЬ БЕЛЫЙ" && sameConfirmedThickness(itemThickness(item), thickness));
+      const back = bestVeneerVariant(variants);
+      form.veneerBModeSelect.value = "other";
+      selectedVeneerBGroup = back;
+      selectedVeneerB = back;
+      form.veneerBInput.value = back ? veneerDisplayName(back) : "";
+      form.veneerBCutSelect.replaceChildren(new Option(back ? veneerCutLabel(back.veneerCut) : "", back?.veneerCut || ""));
+      form.veneerBCutSelect.value = back?.veneerCut || "";
+      form.veneerBCutField.classList.add("is-hidden");
+    } else {
+      form.veneerBModeSelect.value = "same";
+      selectedVeneerBGroup = null;
+      selectedVeneerB = null;
+      form.veneerBInput.value = "";
+    }
+    globalFinishSidesManual = false;
+    form.finishSidesSelect.value = "1 сторона";
+    positionFinishState.forEach((state, rowId) => positionFinishState.set(rowId, { ...state, sides: "1 сторона", sidesManual: false }));
+  }
+
   function defaultFinishSides() {
+    if (isQuickWallPanel()) return "1 сторона";
     return Number(form.veneeredSidesSelect?.value) === 2 ? "2 стороны" : "1 сторона";
   }
 
@@ -437,7 +549,7 @@
   }
 
   function availableLacquerProcesses(sides) {
-    return (data?.finishParameters?.lacquerProcesses || []).filter((item) => Number.isFinite(num(item?.rates?.[sides])));
+    return (data?.finishParameters?.lacquerProcesses || []).filter((item) => Number.isFinite(num(item?.rates?.[sides])) && (!isQuickWallPanel() || !item.id.endsWith("_back_primer")));
   }
 
   function syncGlobalFinishSidesWithVeneer() {
@@ -474,7 +586,7 @@
     const lacquer = isLacquerFinish(finishId);
     const acrylic = isAcrylicLacquer(finishId);
     const enamel = finishId === "enamel";
-    const sides = finishUsesSides(finishId) ? (source.sides || defaultFinishSides()) : "";
+    const sides = finishUsesSides(finishId) ? (isQuickWallPanel() ? "1 сторона" : source.sides || defaultFinishSides()) : "";
 
     let lacquerExecution = lacquer ? (source.lacquerExecution || STANDARD_LACQUER_EXECUTION) : "";
     if (lacquer && !lacquerExecutionExists(lacquerExecution)) lacquerExecution = STANDARD_LACQUER_EXECUTION;
@@ -793,7 +905,7 @@
     const type = selectedMaterialType();
     const isReady = type === "ready_shirt";
     form.veneerAInput.disabled = false;
-    if (form.veneerAInputLabel) form.veneerAInputLabel.textContent = isReady ? "Готовая рубашка" : "Наименование шпона";
+    if (form.veneerAInputLabel) form.veneerAInputLabel.textContent = isReady ? "Готовая рубашка" : (document.body.classList.contains("quick-panels-page") ? "Порода" : "Наименование шпона");
     form.veneerAInput.placeholder = isReady
       ? "Введите наименование или артикул готовой рубашки"
       : type
@@ -1328,6 +1440,10 @@
   function currentEdgeThickness(which = "attached") {
     const controls = edgeControls(which);
     const type = edgeTypeById(controls.typeSelect?.value);
+    if (isQuickWallPanel() && which === "attached") {
+      const value = num(controls.thicknessSelect?.value);
+      return [0.6, 1, 1.5, 2].includes(value) ? value : null;
+    }
     if (!type || type.thicknessMode === "none") return null;
     const value = num(controls.thicknessSelect?.value);
     return Number.isFinite(value) ? value : null;
@@ -1353,6 +1469,14 @@
     const controls = edgeControls(which);
     const type = edgeTypeById(controls.typeSelect?.value);
     const previous = preserve ? currentEdgeThickness(which) : null;
+    if (isQuickWallPanel() && which === "attached") {
+      controls.thicknessSelect.replaceChildren(new Option("Выберите толщину кромки", ""));
+      [0.6, 1, 1.5, 2].forEach(value => controls.thicknessSelect.add(new Option(String(value).replace(".", ","), String(value))));
+      controls.thicknessField.classList.remove("is-hidden");
+      controls.thicknessSelect.disabled = false;
+      controls.thicknessSelect.value = [0.6, 1, 1.5, 2].includes(previous) ? String(previous) : "";
+      return;
+    }
     controls.thicknessSelect.replaceChildren();
     controls.thicknessSelect.add(new Option("Выберите толщину кромки", ""));
 
@@ -1431,7 +1555,7 @@
       delete controls.materialInput.dataset.catalogItemId;
       if (edgeWidthAutomatic[which]) {
         const widths = [...new Set((data?.edgeCatalog || []).flatMap((entry) => entry.availableWidths || []))].sort((a, b) => a - b);
-        const width = widths.find((value) => value > minimumAttachedEdgeWidth());
+        const width = widths.find((value) => edgeWidthFitsProduct(value));
         controls.orderWidthInput.value = width ? String(width) : "";
       }
       return;
@@ -1454,7 +1578,7 @@
 
     controls.materialInput.dataset.catalogItemId = item.id;
     controls.widthSelect.add(new Option("Выберите ширину кромки", ""));
-    const widths = (item.availableWidths || []).filter((width) => Number(width) > minimumAttachedEdgeWidth()).sort((a, b) => a - b);
+    const widths = (item.availableWidths || []).filter((width) => edgeWidthFitsProduct(width)).sort((a, b) => a - b);
     widths.forEach((width) => controls.widthSelect.add(new Option(`${width} мм`, String(width))));
     controls.widthSelect.disabled = false;
     if (!edgeWidthAutomatic[which] && Number.isFinite(previous) && widths.includes(previous)) {
@@ -1472,7 +1596,27 @@
     syncEdgeWidthOptions("separate", { preserve: true });
   }
 
+  function quickPanelFinishedThicknessMm() {
+    if (!isQuickWallPanel() && !isQuickStandardPanel()) return null;
+    const base = parseThicknessComposition(currentBaseThicknessRaw()).total;
+    const face = selectedVeneerThickness();
+    if (!Number.isFinite(base) || base <= 0 || !Number.isFinite(face)) return null;
+    const two = Number(form.veneeredSidesSelect.value) === 2;
+    const back = two ? calibrationSideBThicknessMm()
+      : form.reverseSideSelect.value === "rough" ? roughBackThicknessForCurrentSelection() : null;
+    return Number.isFinite(back) ? base + face + back : null;
+  }
+
+  function edgeWidthFitsProduct(width) {
+    const value = num(width);
+    if (!Number.isFinite(value)) return false;
+    const finished = quickPanelFinishedThicknessMm();
+    return Number.isFinite(finished) ? value + 1e-9 >= finished + 4 : value > minimumAttachedEdgeWidth();
+  }
+
   function minimumAttachedEdgeWidth() {
+    const finished = quickPanelFinishedThicknessMm();
+    if (Number.isFinite(finished)) return finished;
     const state = calibrationState();
     if (Number.isFinite(state.finishedProductThicknessMm)) return state.finishedProductThicknessMm;
     return state.enabled && state.valid && Number.isFinite(state.baseThicknessAfterCalibrationMm)
@@ -1488,7 +1632,7 @@
     const hasThicknessOverride = Object.prototype.hasOwnProperty.call(options, "thicknessMm");
     const thickness = hasThicknessOverride ? num(options.thicknessMm) : currentEdgeThickness(which);
     const item = resolveEdgeCatalogItem(which, { thicknessMm: thickness });
-    const thicknessRequired = Boolean(type && type.thicknessMode !== "none");
+    const thicknessRequired = Boolean(type && (type.thicknessMode !== "none" || isQuickWallPanel() && which === "attached"));
     const customOrder = Boolean(type && rawName && (!group || (group && thicknessRequired && Number.isFinite(thickness) && !item)));
     const selectedStockWidth = Object.prototype.hasOwnProperty.call(options, "widthMm") ? num(options.widthMm) : num(controls.widthSelect.value);
     const requestedOrderWidth = Object.prototype.hasOwnProperty.call(options, "widthMm") ? num(options.widthMm) : num(controls.orderWidthInput.value);
@@ -1531,7 +1675,9 @@
     else if (!Number.isFinite(width) || width <= 0) validationError = "Выберите или укажите ширину кромки.";
 
     if (!validationError && customOrder && Number.isFinite(manualOrderPricePerM2) && manualOrderPricePerM2 < 0) validationError = "Цена заказной кромки не может быть отрицательной.";
-    if (!validationError && which === "attached" && Number.isFinite(width) && width <= minimumAttachedEdgeWidth()) validationError = "Ширина кромки должна превышать толщину детали.";
+    if (!validationError && (which === "attached" || isQuickStandardPanel() && which === "separate") && Number.isFinite(width) && !edgeWidthFitsProduct(width)) validationError = Number.isFinite(quickPanelFinishedThicknessMm())
+      ? "Ширина кромки должна быть больше итоговой толщины изделия минимум на 4 мм."
+      : "Ширина кромки должна превышать толщину детали.";
 
     return {
       which,
@@ -1541,9 +1687,9 @@
       displayName: item?.displayName || rawName,
       veneerName: item?.veneerName || rawName,
       thicknessMm: Number.isFinite(thickness) ? thickness : null,
-      thicknessApplicable: Boolean(type && type.thicknessMode !== "none"),
+      thicknessApplicable: thicknessRequired,
       widthMm: Number.isFinite(width) ? width : null,
-      hasGlue: item?.hasGlue ?? type?.hasGlue ?? null,
+      hasGlue: isQuickWallPanel() && which === "attached" ? false : item?.hasGlue ?? type?.hasGlue ?? null,
       hasFleece: item?.hasFleece ?? type?.hasFleece ?? null,
       catalogItem: item,
       catalogItemId: item?.id || null,
@@ -1660,6 +1806,16 @@
   function validateSeparateEdgeMetersOnBlur() {
     if (form.edgeModeSelect.value !== "separate") return true;
     const raw = form.separateEdgeMetersInput.value.trim();
+    if (isQuickStandardPanel()) {
+      separateEdgeMetersManual = true;
+      markFieldTouched("separateEdgeMeters");
+      const value = num(raw);
+      const valid = Number.isFinite(value) && value >= 50;
+      recalc();
+      setSeparateEdgeMetersError(valid ? "" : "Минимальный заказ кромки 50 пог. м");
+      setSeparateEdgeMetersWarning("");
+      return valid;
+    }
     if (raw) markFieldTouched("separateEdgeMeters");
     if (!raw) {
       separateEdgeMetersManual = false;
@@ -2263,7 +2419,7 @@
     if (form.veneerBModeHint) form.veneerBModeHint.textContent = "";
     if (readyShirtWithoutThickness && form.veneerBModeSelect.value === "other") form.veneerBModeSelect.value = "same";
 
-    if (isAtLeastOnePointFive(thickness)) {
+    if (requiresTwoFaceSides(thickness)) {
       form.veneeredSidesSelect.value = "2";
       form.veneeredSidesSelect.disabled = true;
     } else {
@@ -2320,6 +2476,7 @@
   }
 
   function updateSidesUI() {
+    syncQuickWallBack();
     updateVeneerBModeLabel();
     const faceReady = faceMaterialSelectionReady();
     form.veneeredSidesField?.classList.toggle("is-hidden", !faceReady);
@@ -2331,6 +2488,8 @@
     form.veneerBSearchField.classList.toggle("is-hidden", !other);
     form.veneerBRoughThicknessField?.classList.toggle("is-hidden", !rough);
     form.veneerSideBGrid?.classList.toggle("is-hidden", !faceReady || two);
+    syncQuickWallBack();
+    syncQuickPaperBack();
     if (!other) {
       clearTouchedFields("veneerB", "veneerBCut", "veneerBPrice", "veneerBCondition");
       selectedVeneerBGroup = null;
@@ -2825,8 +2984,8 @@
 
       <div class="size-row__extra" data-size-extra>
         <label class="toggle-line">
-          <input data-size-transition type="checkbox" />
-          <span>Переход рисунка</span>
+          <input data-size-transition type="checkbox" ${isQuickWallPanel() || isQuickStandardPanel() ? "disabled" : ""} />
+          <span>${isQuickWallPanel() ? "Нужен переход рисунка на панелях?" : document.body.classList.contains("quick-panels-page") && document.body.dataset.panelScenario === "details" ? "Нужен переход рисунка на деталях?" : "Переход рисунка"}</span>
         </label>
         <p class="field__error" data-size-transition-quantity-error></p>
 
@@ -2912,7 +3071,7 @@
   }
 
   function updateSizeTransitionUI(row) {
-    const transition = Boolean($('[data-size-transition]', row)?.checked);
+    const transition = !isQuickWallPanel() && !isQuickDetailsPanel() && !isQuickStandardPanel() && Boolean($('[data-size-transition]', row)?.checked);
     const quantityState = quantityValueState(row);
     const quantity = quantityState.value;
     const hasDescription = Boolean($('[data-size-comment]', row)?.value.trim()) || uploadedFileNames($('[data-size-files]', row)).length > 0;
@@ -2922,7 +3081,7 @@
     const quantityError = $('[data-size-transition-quantity-error]', row);
     const detailsError = $('[data-size-transition-details-error]', row);
     const quantityInvalid = transition && (window.WoodstockPanelsView?.transitionMinimumPieces ? shortTransitionState().pieces < window.WoodstockPanelsView.transitionMinimumPieces : quantityState.valid && Number.isFinite(quantity) && quantity > 1);
-    const detailsInvalid = transition && !(window.WoodstockPanelsView?.transitionMinimumPieces ? shortTransitionState().described : hasDescription);
+    const detailsInvalid = !isQuickWallPanel() && transition && !(window.WoodstockPanelsView?.transitionMinimumPieces ? shortTransitionState().described : hasDescription);
     if (quantityError) quantityError.textContent = quantityInvalid && (addAttempted || touchedFields.has(transitionKey))
       ? transitionQuantityMessage()
       : "";
@@ -3104,7 +3263,7 @@
         physicalSizeValid,
         calcLength,
         calcWidth,
-        transition: Boolean($('[data-size-transition]', row)?.checked),
+        transition: !isQuickWallPanel() && !isQuickDetailsPanel() && !isQuickStandardPanel() && Boolean($('[data-size-transition]', row)?.checked),
         comment: $('[data-size-comment]', row)?.value.trim() || "",
         files: uploadedFileNames($('[data-size-files]', row))
       };
@@ -3137,7 +3296,7 @@
   }
 
   function transitionPricingState(size) {
-    const enabled = Boolean(size?.transition);
+    const enabled = !isQuickWallPanel() && !isQuickDetailsPanel() && !isQuickStandardPanel() && Boolean(size?.transition);
     const applies = enabled && isExactFinishedDetail(size);
     const coefficient = applies ? (num(data?.meta?.transitionMarkupCoefficient) || 2.53) : null;
     return { enabled, applies, coefficient };
@@ -3304,7 +3463,7 @@
     recalc();
   }
 
-  function setCustomSizeMode(row) {
+  function setCustomSizeMode(row, { focus = true } = {}) {
     if (!row) return;
     row.dataset.sizeMode = "custom";
     delete row.dataset.sourceStandardLength;
@@ -3320,7 +3479,7 @@
     renderStandardSizesForRow(row);
     updateSizeRowAvailability(row);
     updatePositionFinishLabels();
-    lengthInput.focus();
+    if (focus) lengthInput.focus();
     recalc();
   }
 
@@ -3425,9 +3584,10 @@
 
   function syncEdgeModeFields() {
     const mode = form.edgeModeSelect.value;
-    form.attachedEdgeFields.classList.toggle("is-hidden", mode !== "attached");
+    const showWallEdgeFields = isQuickWallPanel() && selectedBase()?.id !== "gsp";
+    form.attachedEdgeFields.classList.toggle("is-hidden", mode !== "attached" && !showWallEdgeFields);
     form.separateEdgeFields.classList.toggle("is-hidden", mode !== "separate");
-    form.edgeCommentField.classList.toggle("is-hidden", mode === "none");
+    form.edgeCommentField.classList.toggle("is-hidden", mode === "none" && !showWallEdgeFields);
     if (mode !== "separate") {
       clearTouchedFields("separateEdgeType", "separateEdgeMaterial", "separateEdgeThickness", "separateEdgeWidth", "separateEdgeMeters");
       setSeparateEdgeMetersError("");
@@ -3452,8 +3612,15 @@
     recalc();
   }
 
+  function availableAttachedEdgeSides() {
+    if (!isQuickWallPanel()) return data?.edgeSides || [];
+    const labels = { perimeter: "По периметру", two_lengths: "По длинным сторонам", two_widths: "По коротким сторонам" };
+    return (data?.edgeSides || []).filter(item => Object.prototype.hasOwnProperty.call(labels, item.id))
+      .map(item => ({ ...item, name: labels[item.id] }));
+  }
+
   function edgeRuleById(id) {
-    return (data?.edgeSides || []).find((item) => item.id === id) || null;
+    return (isQuickWallPanel() ? availableAttachedEdgeSides() : data?.edgeSides || []).find((item) => item.id === id) || null;
   }
 
   function edgeMetersForSize(size, sidesId = form.edgeSidesSelect.value) {
@@ -3461,7 +3628,12 @@
     return geometricEdgeMetersForSize(size, sidesId) * 1.2;
   }
 
+  function separateEdgeMinimumMeters() {
+    return isQuickStandardPanel() ? 50 : num(data?.meta?.edgeSeparateMinimumRunningM);
+  }
+
   function separateEdgeAutomaticMeters() {
+    if (isQuickStandardPanel()) return 0;
     const sides = form.separateEdgeSidesSelect?.value || "perimeter";
     return readSizeRows().filter((size) => size.mode && size.quantityValid && size.physicalSizeValid && size.length > 0 && size.width > 0 && size.quantity > 0)
       .reduce((sum, size) => sum + geometricEdgeMetersForSize(size, sides), 0);
@@ -3469,13 +3641,20 @@
 
   function syncSeparateEdgeMeters() {
     if (!form.separateEdgeMetersInput) return;
+    if (isQuickStandardPanel()) {
+      separateEdgeMetersManual = true;
+      form.separateEdgeMetersReset?.classList.add("is-hidden");
+      if (form.separateEdgeMetersSummary) form.separateEdgeMetersSummary.textContent = "Минимальный заказ кромки 50 пог. м";
+      setSeparateEdgeMetersWarning("");
+      return;
+    }
     const meters = separateEdgeAutomaticMeters();
     if (!separateEdgeMetersManual) form.separateEdgeMetersInput.value = meters > 0 ? String(round(meters, 6)) : "";
     form.separateEdgeMetersReset?.classList.toggle("is-hidden", !separateEdgeMetersManual);
     if (form.separateEdgeMetersSummary) form.separateEdgeMetersSummary.textContent =
       `${separateEdgeMetersManual ? "Ручная корректировка. " : ""}По размерам и выбранным торцам: ${round(meters, 2)} пог. м. Запас не добавлен.`;
     const selected = num(form.separateEdgeMetersInput.value);
-    const minimum = num(data?.meta?.edgeSeparateMinimumRunningM);
+    const minimum = separateEdgeMinimumMeters();
     setSeparateEdgeMetersWarning(Number.isFinite(selected) && selected > 0 && selected < minimum
       ? `Менее ${minimum} пог. м: проверьте общий метраж заявки.` : "");
   }
@@ -3483,7 +3662,9 @@
   function geometricEdgeMetersForSize(size, sidesId = form.edgeSidesSelect.value) {
     const rule = edgeRuleById(sidesId);
     if (!rule || !size?.length || !size?.width || !size?.quantity) return 0;
-    return ((Number(rule.lengthCount || 0) * size.length + Number(rule.widthCount || 0) * size.width) / 1000) * size.quantity;
+    const length = isQuickWallPanel() ? Math.max(size.length, size.width) : size.length;
+    const width = isQuickWallPanel() ? Math.min(size.length, size.width) : size.width;
+    return ((Number(rule.lengthCount || 0) * length + Number(rule.widthCount || 0) * width) / 1000) * size.quantity;
   }
 
   function defaultPositionEdgeState() {
@@ -3549,7 +3730,7 @@
 
   function positionEdgeWidthControl(state) {
     const item = resolveEdgeCatalogItem("attached", { thicknessMm: state.thicknessMm });
-    const widths = (item?.availableWidths || []).filter((width) => Number(width) > minimumAttachedEdgeWidth());
+    const widths = (item?.availableWidths || []).filter((width) => edgeWidthFitsProduct(width));
     return item
       ? `<select data-position-edge-width><option value="">Выберите ширину</option>${widths.map((width) => `<option value="${esc(width)}"${Number(state.widthMm) === Number(width) ? " selected" : ""}>${width} мм</option>`).join("")}</select>`
       : `<input data-position-edge-width type="number" min="1" value="${esc(state.widthMm || "")}" />`;
@@ -3818,8 +3999,8 @@
       return started && !(size.length > 0 && size.width > 0 && size.quantityValid);
     });
     const quantityInvalidRows = sizes.filter((size) => size.mode && size.length > 0 && size.width > 0 && !size.quantityValid);
-    const transitionQuantityInvalidRows = sizes.filter((size) => size.transition && (window.WoodstockPanelsView?.transitionMinimumPieces ? shortTransitionState().pieces < window.WoodstockPanelsView.transitionMinimumPieces : size.quantityValid && Number.isFinite(size.quantity) && size.quantity > 1));
-    const transitionDescriptionInvalidRows = sizes.filter((size) => size.transition && !(window.WoodstockPanelsView?.transitionMinimumPieces ? shortTransitionState().described : size.comment || size.files.length));
+    const transitionQuantityInvalidRows = sizes.filter((size) => !isQuickWallPanel() && size.transition && (window.WoodstockPanelsView?.transitionMinimumPieces ? shortTransitionState().pieces < window.WoodstockPanelsView.transitionMinimumPieces : size.quantityValid && Number.isFinite(size.quantity) && size.quantity > 1));
+    const transitionDescriptionInvalidRows = sizes.filter((size) => !isQuickWallPanel() && size.transition && !(window.WoodstockPanelsView?.transitionMinimumPieces ? shortTransitionState().described : size.comment || size.files.length));
     const minimumSizeInvalidRows = sizes.filter(size => size.minimumSizeValid === false);
     const physicalSizeInvalidRows = sizes.filter((size) => size.physicalSizeValid === false);
     const technologicalSizeInvalidRows = sizes.filter((size) => size.physicalSizeValid !== false && size.technologicalSizeValid === false);
@@ -5271,10 +5452,10 @@
         ...edge,
         ...selection,
         comment: form.edgeCommentInput.value.trim(),
-        sidesId: form.separateEdgeSidesSelect.value,
-        sidesName: edgeRuleById(form.separateEdgeSidesSelect.value)?.name || "",
+        sidesId: isQuickStandardPanel() ? null : form.separateEdgeSidesSelect.value,
+        sidesName: isQuickStandardPanel() ? "" : edgeRuleById(form.separateEdgeSidesSelect.value)?.name || "",
         geometricMeters: separateEdgeAutomaticMeters(),
-        calculatedMeters: separateEdgeAutomaticMeters(),
+        calculatedMeters: isQuickStandardPanel() ? orderEdgeMeters : separateEdgeAutomaticMeters(),
         metersSource: separateEdgeMetersManual ? "manual" : "automatic",
         reserveCoefficient: 1,
         orderedMeters: Number.isFinite(meters) ? meters : null,
@@ -5286,10 +5467,15 @@
         operationMethod: null
       };
 
-      const minMeters = num(data?.meta?.edgeSeparateMinimumRunningM);
+      const minMeters = separateEdgeMinimumMeters();
       if (!Number.isFinite(meters) || meters <= 0) {
         edge.valid = false;
         edge.validationError = "Укажите требуемый метраж отдельной кромки.";
+        warnings.push(edge.validationError);
+        hasPartialPrice = true;
+      } else if (isQuickStandardPanel() && meters < minMeters) {
+        edge.valid = false;
+        edge.validationError = "Минимальный заказ кромки 50 пог. м";
         warnings.push(edge.validationError);
         hasPartialPrice = true;
       } else if (Number.isFinite(minMeters) && meters < minMeters) {
@@ -5496,17 +5682,15 @@
         requiresProductionCost = true;
       }
 
-      // Тонировка и изолятор имеют подтверждённые отдельные ставки только тогда,
-      // когда основное лаковое покрытие рассчитывается автоматически. Для ПУ и
-      // Глянца 100% состав общей производственной суммы не подтверждён, поэтому
-      // выбранные параметры сохраняются, но автоматически поверх неё не начисляются.
+      // Quick wall-panel and facade toning is separate, including with PU lacquer.
+      // Other scenarios and isolator pricing retain the existing production-scope rule.
       const extrasCanBePricedSeparately = pricingStatus === "calculated" && isLacquerFinish(normalizedConfig.finishId);
 
       let positionToningCost = 0;
       let toningPricingStatus = "not_required";
       let toningRatePerM2 = null;
       if (normalizedConfig.toning === "yes" && isLacquerFinish(normalizedConfig.finishId)) {
-        if (extrasCanBePricedSeparately) {
+        if (extrasCanBePricedSeparately || isQuickWallPanel() || isQuickDetailsPanel()) {
           toningRatePerM2 = num(data?.meta?.toningRatePerM2);
           if (Number.isFinite(toningRatePerM2)) {
             positionToningCost = extraProcessedAreaM2 * toningRatePerM2;
@@ -5643,7 +5827,7 @@
     const selectedRoughThickness = roughSideRequested ? selectedRoughBackThickness() : null;
     const sideThicknessCompatible = !otherSideRequested || sameConfirmedThickness(veneerThickness, sideBThickness);
     const roughSideCompatible = !roughSideRequested || (isExactlyOnePointFive(veneerThickness) && Number.isFinite(selectedRoughThickness) && selectedRoughThickness <= 1.5 + 0.001);
-    if (isAtLeastOnePointFive(veneerThickness) && sides !== 2) warnings.push("Шпон толщиной 1,5 мм и более требует двусторонней оклейки.");
+    if (requiresTwoFaceSides(veneerThickness) && sides !== 2) warnings.push(document.body.classList.contains("quick-panels-page") ? twoSidedVeneerRequirementMessage() : "Шпон толщиной 1,5 мм и более требует двусторонней оклейки.");
     if (otherSideRequested && isReadyShirt(selectedVeneerA || selectedVeneerAGroup) && !Number.isFinite(veneerThickness)) {
       warnings.push("Для выбора другого материала необходимо указать подтверждённую толщину готовой рубашки");
     } else if (otherSideRequested && otherSideMaterialForCompatibility && !sideThicknessCompatible) {
@@ -5674,13 +5858,21 @@
       (roughSideRequested && roughSideCompatible) ||
       Boolean(selectedVeneerB || (selectedVeneerBGroup && selectedVeneerBGroup.type !== "natural"))
     ) && sideThicknessCompatible && roughSideCompatible;
+    const pendingQuickRules = [];
+    if (isQuickWallPanel() && Math.abs(veneerThickness - 2) < 0.001) pendingQuickRules.push("Лицевой слой 2 мм: материал и цена оборота не согласованы; показанная стоимость предварительная.");
+    if ((isQuickWallPanel() || isQuickStandardPanel()) && form.edgeModeSelect.value !== "none" && sides === 1 && form.reverseSideSelect.value === "paper") pendingQuickRules.push("Толщина бумаги не подтверждена: ширина и стоимость кромки предварительные, требуется согласование производства.");
+    if (pendingQuickRules.length) {
+      hasPartialPrice = true;
+      requiresProductionCost = true;
+      pendingQuickRules.forEach(message => { warnings.push(message); itemResults.forEach(item => markPositionPending(item, message)); });
+    }
     let priceCalculationComplete = Boolean(
       base &&
       Number.isFinite(thickness.total) &&
       validSizes.length &&
       faceVeneerReady &&
       faceThicknessReady &&
-      (!isAtLeastOnePointFive(veneerThickness) || sides === 2) &&
+      (!requiresTwoFaceSides(veneerThickness) || sides === 2) &&
       reverseSideReady &&
       (!layoutSelectionRequired || layout) &&
       layoutValidation.valid &&
@@ -5741,7 +5933,7 @@
           readyShirtPricings.some(item=>!Number.isFinite(item.finalPurchase?.cost)||item.finalPurchase?.partial)||
           (edge.mode!=='none'&&!['calculated','calculated_manual_order_price','not_required'].includes(edge.materialPricingStatus));
         const pending=itemResults.some(item=>(positionPendingCosts.get(item.rowId)?.size||0)>0);
-        const parametersReady=Boolean(base&&Number.isFinite(thickness.total)&&validSizes.length&&faceVeneerReady&&faceThicknessReady&&(!isAtLeastOnePointFive(veneerThickness)||sides===2)&&reverseSideReady&&(!layoutSelectionRequired||layout)&&layoutValidation.valid&&sizeValidation.valid);
+        const parametersReady=Boolean(base&&Number.isFinite(thickness.total)&&validSizes.length&&faceVeneerReady&&faceThicknessReady&&(!requiresTwoFaceSides(veneerThickness)||sides===2)&&reverseSideReady&&(!layoutSelectionRequired||layout)&&layoutValidation.valid&&sizeValidation.valid);
         priceCalculationComplete=parametersReady&&!pending&&!materialUnresolved;
         requiresProductionCost=productionCosts.some(item=>item.status!=='provided');
         if(edge.mode==='attached'&&edge.operationRequiresProductionCost&&itemResults.filter(item=>item.productionCost?.coveredReasons.some(reason=>reason.startsWith('Операция кромления:'))).every(item=>item.productionCost.status==='provided')){
@@ -6638,8 +6830,8 @@
 
     const sides = Number(form.veneeredSidesSelect.value);
     const veneerThickness = selectedVeneerThickness();
-    if (isAtLeastOnePointFive(veneerThickness) && sides !== 2) {
-      add("veneeredSides", "две фанерованные стороны", form.veneeredSidesSelect, "Шпон толщиной 1,5 мм и более требует двух фанерованных сторон.");
+    if (requiresTwoFaceSides(veneerThickness) && sides !== 2) {
+      add("veneeredSides", "две фанерованные стороны", form.veneeredSidesSelect, twoSidedVeneerRequirementMessage());
     }
 
     if (sides === 2 && form.veneerBModeSelect.value === "other") {
@@ -6781,9 +6973,11 @@
       }
       if (edgeMode === "separate") {
         const meters = num(form.separateEdgeMetersInput.value);
-        const minMeters = num(data?.meta?.edgeSeparateMinimumRunningM);
+        const minMeters = separateEdgeMinimumMeters();
         if (!Number.isFinite(meters) || meters <= 0) {
           add("separateEdgeMeters", "метраж отдельной кромки", form.separateEdgeMetersInput, "Укажите требуемый метраж отдельной кромки.", form.separateEdgeMetersError);
+        } else if (isQuickStandardPanel() && meters < minMeters) {
+          add("separateEdgeMeters", "метраж отдельной кромки", form.separateEdgeMetersInput, "Минимальный заказ кромки 50 пог. м", form.separateEdgeMetersError);
         }
       }
       if (edgeMode === "attached") {
@@ -7074,7 +7268,27 @@
     return blockingWarning ? `Цена не рассчитана: ${blockingWarning}` : "Расчёт не завершён";
   }
 
+  function syncQuickWallEdge() {
+    if (!isQuickWallPanel()) return;
+    // Existing KM1 certificate handling remains authoritative for GSP.
+    if (selectedBase()?.id === "gsp") return;
+    form.edgeModeSelect.value = "attached";
+    form.edgeBevelSelect.value = "no";
+    edgeWidthAutomatic.attached = true;
+    const typeId = Math.abs(num(form.edgeThicknessSelect.value) - 0.6) < 0.001 ? "vl_s" : "thick";
+    if (form.edgeTypeSelect.value !== typeId) {
+      form.edgeTypeSelect.value = typeId;
+      clearEdgeCatalogBinding("attached");
+      syncEdgeThicknessOptions("attached", { preserve: true });
+      syncEdgeDefaultForKind("attached");
+    }
+  }
+
   function recalc() {
+    syncQuickWallBack();
+    syncQuickPaperBack();
+    syncQuickWallEdge();
+    if (isQuickStandardPanel()) edgeWidthAutomatic.separate = true;
     syncEdgeWidthOptions("attached", { preserve: true });
     syncEdgeWidthOptions("separate", { preserve: true });
     syncSeparateEdgeMeters();
@@ -7082,7 +7296,7 @@
     updateThicknessWarnings();
     const edgeModeChangedByAvailability = updateAttachedEdgeAvailability();
     syncPositionEdgeStateWithRows();
-    if (edgeModeChangedByAvailability) syncEdgeModeFields();
+    if (edgeModeChangedByAvailability || isQuickWallPanel()) syncEdgeModeFields();
     if (form.edgeModeSelect.value === "attached" && positionEdgeOverridesEnabled) renderPositionEdgeOverrides();
     syncVeneerActualOverridesWithDemand();
     lastCalculation = calculate();
@@ -7093,8 +7307,8 @@
     }
     renderLocalValidation(lastCalculation);
     const showEdgeMeters = form.edgeModeSelect.value === "attached" && lastCalculation.attachedEdgeMeters > 0;
-    form.attachedEdgeMetersSummary.classList.toggle("is-hidden", !showEdgeMeters);
-    form.attachedEdgeMetersSummary.textContent = showEdgeMeters ? `По торцам: ${round(lastCalculation.edge.geometricMeters, 2)} пог. м · с запасом 20%: ${round(lastCalculation.edge.calculatedMeters, 2)} пог. м` : "";
+    form.attachedEdgeMetersSummary.classList.toggle("is-hidden", !showEdgeMeters && !isQuickWallPanel());
+    form.attachedEdgeMetersSummary.textContent = showEdgeMeters ? `По торцам: ${round(lastCalculation.edge.geometricMeters, 2)} пог. м · с запасом 20%: ${round(lastCalculation.edge.calculatedMeters, 2)} пог. м` : isQuickWallPanel() ? "—" : "";
     const edgeCostSummary = el(lastCalculation.edge.mode === "attached" ? "edgeCostSummary" : "separateEdgeCostSummary");
     if (edgeCostSummary) {
       const edge = lastCalculation.edge;
@@ -7474,10 +7688,8 @@
     });
     form.baseSelect.value = window.WoodstockPanelsView?.emptyInitialBase ? "" : "mdf";
     syncLayoutOptions({ preserve: false });
-    data.edgeSides.forEach((x) => {
-      form.edgeSidesSelect.add(new Option(x.name, x.id));
-      form.separateEdgeSidesSelect.add(new Option(x.name, x.id));
-    });
+    availableAttachedEdgeSides().forEach((x) => form.edgeSidesSelect.add(new Option(x.name, x.id)));
+    data.edgeSides.forEach((x) => form.separateEdgeSidesSelect.add(new Option(x.name, x.id)));
     form.separateEdgeSidesSelect.value = "perimeter";
     (data.edgeTypes || []).forEach((x) => {
       form.edgeTypeSelect.add(new Option(x.name, x.id));
@@ -7919,8 +8131,8 @@
     const sideAMaterialForSave = selectedVeneerA || selectedVeneerAGroup;
     const sideBOtherMaterialForSave = selectedVeneerB || selectedVeneerBGroup;
     const sideBSelectionModeForSave = sides === 2 ? form.veneerBModeSelect.value : "";
-    if (isAtLeastOnePointFive(veneerThickness) && sides !== 2) {
-      form.saveStatus.textContent = "Шпон толщиной 1,5 мм и более требует двух фанерованных сторон.";
+    if (requiresTwoFaceSides(veneerThickness) && sides !== 2) {
+      form.saveStatus.textContent = twoSidedVeneerRequirementMessage();
       return;
     }
     if (sides === 2 && sideBSelectionModeForSave === "other") {
@@ -8520,7 +8732,7 @@
       separateEdgeMetersManual = true;
       setSeparateEdgeMetersError("");
       const meters = num(form.separateEdgeMetersInput.value);
-      const minMeters = num(data?.meta?.edgeSeparateMinimumRunningM);
+      const minMeters = separateEdgeMinimumMeters();
       setSeparateEdgeMetersWarning(Number.isFinite(meters) && meters > 0 && Number.isFinite(minMeters) && meters < minMeters
         ? `Менее ${minMeters} пог. м: минимум пока не подтверждён на уровне одной позиции. Проверьте общий метраж заявки.`
         : "");
