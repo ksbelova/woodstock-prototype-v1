@@ -25,7 +25,7 @@
   }
   function services(){return [...(order.packagingSelect?['Упаковка: '+order.packagingSelect]:[]),...Object.entries(serviceNames).filter(([id])=>order[id]).map(([,label])=>label)];}
   function known(record){if(inProduction(record))return materialKnown(record);if(editorController&&editorIndex!==null&&records[editorIndex]?.id===record.id){const live=editorController.result?.();const value=live?.finalTotal??live?.total??null;return partial(record)&&value===0?null:value;}const value=Number.isFinite(record.specification?.knownTotal)?record.specification.knownTotal:Number.isFinite(record.total)?record.total:null;return partial(record)&&value===0?null:(Number.isFinite(value)?value+edgeDiscount(record).delta:value);}
-  function partial(record){if(inProduction(record))return !quoteState().valid||!materialsComplete(record);if(editorController&&editorIndex!==null&&records[editorIndex]?.id===record.id){const live=editorController.result?.();return !live||(productType==='plate'?!live.priceCalculationComplete:!Number.isFinite(live.total));}return record.pricingPartial===true||!Number.isFinite(record.total);}
+  function partial(record){if(record.sizes?.some(row=>row.productionFitStatus==='unconfirmed'))return true;if(inProduction(record))return !quoteState().valid||!materialsComplete(record);if(editorController&&editorIndex!==null&&records[editorIndex]?.id===record.id){const live=editorController.result?.();return !live||(productType==='plate'?!live.priceCalculationComplete:!Number.isFinite(live.total));}return record.pricingPartial===true||!Number.isFinite(record.total);}
     // Production quote belongs to the order and is never allocated to individual rows.
   const productionReason = reason => /^(Стоимость производства|Основа и производственные операции|Работа с толстым шпоном|Операция кромления:|Калибровка:|Фаска:|Финишное покрытие)/.test(reason);
   const productionEligible = record => record.productType==='plate' && !record.sizes?.some(row=>row.classificationId==='warehouse_standard');
@@ -41,6 +41,7 @@
   }
   function materialKnown(record){return materialParts(record).reduce((sum,item)=>sum+(Number.isFinite(item.value)?item.value:0),0)+edgeDiscount(record).delta;}
   function materialsComplete(record){
+    if(record.sizes?.some(row=>row.productionFitStatus==='unconfirmed'))return false;
     const missing=(record.sizes||[]).flatMap(row=>row.pendingCosts||[]).filter(reason=>!productionReason(reason));
     return !missing.length && Object.values(record.pricing?.veneer||{}).flat().every(item=>Number.isFinite(item.calculatedCost)&&!item.condition?.unresolved&&!item.condition?.requiresPriceAgreement) && (record.veneerConsumptions||[]).every(item=>Number.isFinite(item.materialCost)) && (record.pricing?.readyShirts||[]).every(item=>item.requirementStatus==='calculated'&&Number.isFinite(item.materialCost)&&!item.priceCondition?.unresolved) &&
       (record.edge?.mode==='none'||!record.edge||['calculated','calculated_manual_order_price','not_required'].includes(record.edge.materialPricingStatus));
@@ -58,7 +59,7 @@
   function decimal(value){const raw=String(value??'').trim().replace(/\s/g,'');return /^\d+(?:[.,]\d{1,2})?$/.test(raw)?Number(raw.replace(',','.')):null;}
   function quoteState(){
     const scope=productionScope(),quote=order.productionQuote;
-    const valid=scope.length>0&&!!quote&&quote.signature===quoteSignature()&&quote.cost>0&&quote.markup>=0&&Number.isSafeInteger(Math.round(quote.cost*100))&&Number.isSafeInteger(Math.round(quote.cost*(1+quote.markup/100)*100));
+    const valid=scope.length>0&&!!quote&&quote.signature===quoteSignature()&&quote.cost>0&&quote.markup>=0&&(productType!=='plate'||quote.markup===50)&&Number.isSafeInteger(Math.round(quote.cost*100))&&Number.isSafeInteger(Math.round(quote.cost*(1+quote.markup/100)*100));
     return {scope,valid,stale:!!quote&&!valid,cost:valid?quote.cost:null,markup:valid?quote.markup:null,clientCost:valid?quote.cost*(1+quote.markup/100):null};
   }
   function renderProduction(){
@@ -600,7 +601,7 @@
     if(order.productionQuote)order.productionQuote.signature='';saveOrder();
   }));
   $('confirmProduction').addEventListener('click',()=>{
-    const cost=decimal($('productionCostInput').value),markup=decimal($('productionMarkupInput').value);
+    const cost=decimal($('productionCostInput').value),markup=productType==='plate'?50:decimal($('productionMarkupInput').value);
     if(!productionScope().length||cost===null||cost<=0||!Number.isSafeInteger(Math.round(cost*100))||markup===null||markup<0||!Number.isSafeInteger(Math.round(cost*(1+markup/100)*100))){$('productionStatus').textContent='Введите положительную себестоимость с точностью до копеек и неотрицательную наценку. Итоговая сумма должна быть корректным денежным значением.';return;}
     order.productionQuote={cost,markup,signature:quoteSignature(),confirmedAt:new Date().toISOString()};saveOrder();render();
   });
@@ -633,7 +634,8 @@
     let changed=false;records.forEach(record=>{if(!record.id){record.id=uid();changed=true;}});if(changed)persist();
     document.querySelectorAll('[data-order]').forEach(node=>{if(order[node.id]!==undefined){if(node.type==='checkbox')node.checked=order[node.id];else node.value=order[node.id];}});
     $('productionCostInput').value=order.productionCostDraft??order.productionQuote?.cost??'';
-    $('productionMarkupInput').value=order.productionMarkupDraft??order.productionQuote?.markup??'50';
+    $('productionMarkupInput').value=productType==='plate'?'50':order.productionMarkupDraft??order.productionQuote?.markup??'50';
+    if(productType==='plate'){$('productionMarkupInput').readOnly=true;$('productionMarkupInput').setAttribute('aria-readonly','true');}
     saveOrder();render();prepareLegacyRecords();
   }catch(error){status('Не удалось открыть спецификацию: '+error.message);$('downloadSpecification').disabled=true;}
 })();

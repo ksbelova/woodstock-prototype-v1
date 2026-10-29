@@ -131,7 +131,7 @@
     return row ? parseNumber(row.ratePerRunningM) : null;
   }
 
-  function edgeRateFor(data, baseId, thicknessRaw, edgeThickness, runningM) {
+  function edgeRateFor(data, baseId, thicknessRaw, edgeThickness, runningM, options = {}) {
     const fallbackBases = Array.isArray(data?.meta?.legacyOperationRateFallbackBaseIds)
       ? data.meta.legacyOperationRateFallbackBaseIds
       : ["mdf", "dsp"];
@@ -143,7 +143,8 @@
     if (!group) return null;
 
     const threshold = parseNumber(data?.meta?.edgeMachineThresholdRunningM) ?? 40;
-    const method = meters >= threshold ? "Machine" : "Manual";
+    const machine = options.machineThresholdExclusive ? meters > threshold : meters >= threshold;
+    const method = machine ? "Machine" : "Manual";
     const currentKey = `${group}${method}RatePerRunningM`;
     const currentRate = parseNumber(row[currentKey]);
     if (Number.isFinite(currentRate)) {
@@ -417,17 +418,20 @@
       if (!(usableWidthMm > 0 && usableLengthMm > 0)) {
         return { ...base, reason: `Для мультишпона формата ${physical.lengthMm}×${physical.widthMm} мм нет подтверждённой полезной ширины/геометрии.` };
       }
-      if (panelLengthMm > usableLengthMm + 0.000001) {
-        return { ...base, usableWidthMm, usableLengthMm, reason: `Длина панели ${panelLengthMm} мм превышает подтверждённую рабочую длину листа ${usableLengthMm} мм.` };
+      const shirtAllowanceMm = options.roundMultiSheetsPerPanel ? 50 : 0;
+      if (panelLengthMm + shirtAllowanceMm > usableLengthMm + 0.000001) {
+        return { ...base, usableWidthMm, usableLengthMm, reason: `Длина панели с запасом рубашки ${panelLengthMm + shirtAllowanceMm} мм превышает подтверждённую рабочую длину листа ${usableLengthMm} мм.` };
       }
 
-      const across = panelWidthMm / usableWidthMm;
+      const across = (panelWidthMm + shirtAllowanceMm) / usableWidthMm;
       // Подтверждённый пример 2070/620 = 3,34 -> технологически 3,5 листа на сторону.
       // Поэтому для этого подтверждённого формата технологическая потребность
       // округляется вверх до половины листа; к покупке итог округляется до целого листа.
       const technicalSheetsPerSurface = Math.ceil((across * 2) - 1e-9) / 2;
       const technicalSheets = technicalSheetsPerSurface * quantity * surfaceCount;
-      const purchasedSheets = Math.ceil(technicalSheets - 1e-9);
+      const purchasedSheets = options.roundMultiSheetsPerPanel
+        ? Math.ceil(technicalSheetsPerSurface * surfaceCount - 1e-9) * quantity
+        : Math.ceil(technicalSheets - 1e-9);
       return {
         ...base,
         exact: true,
