@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const DATA_URL = "../../data/panels.json?v=20261017-remove-ready-shirts";
+  const DATA_URL = "../../data/panels.json?v=20261103-ordered-edge";
   const Core = window.WoodstockPanelsCore;
   // Общая спецификация: инженерная доска уже сохраняется в этот же ключ.
   const SPEC_STORAGE_KEY = "woodstockDetailedSpecification";
@@ -36,7 +36,7 @@
     retailPriceValue: el("retailPriceValue"), manualDiscountField: el("manualDiscountField"), manualDiscountInput: el("manualDiscountInput"), manualDiscountError: el("manualDiscountError"), finalPriceField: el("finalPriceField"), finalPriceValue: el("finalPriceValue"), finalPriceNote: el("finalPriceNote"), priceAdjustmentsBlock: el("priceAdjustmentsBlock"), priceAdjustmentsList: el("priceAdjustmentsList"),
 
     commentInput: el("commentInput"), filesInput: el("filesInput"), selectedFiles: el("selectedFiles"),
-    specCharacteristics: el("specCharacteristics"), specSizes: el("specSizes"), specPricePerM2Label: el("specPricePerM2Label"), specPricePerM2: el("specPricePerM2"), specPricePerPieceLabel: el("specPricePerPieceLabel"), specPricePerPiece: el("specPricePerPiece"), specTotal: el("specTotal"), specVat: el("specVat"), addToSpecButton: el("addToSpecButton"), saveStatus: el("saveStatus")
+    specCharacteristics: el("specCharacteristics"), specSizes: el("specSizes"), specPricePerM2Label: el("specPricePerM2Label"), specPricePerM2: el("specPricePerM2"), specPricePerPieceLabel: el("specPricePerPieceLabel"), specPricePerPiece: el("specPricePerPiece"), specTotal: el("specTotal"), specTotalLabel: el("specTotalLabel"), specPartialNote: el("specPartialNote"), specVat: el("specVat"), finalPriceLabel: el("finalPriceLabel"), addToSpecButton: el("addToSpecButton"), saveStatus: el("saveStatus")
   };
 
   let data = null;
@@ -117,6 +117,9 @@
   const num = Core.parseNumber;
   const round = Core.round;
   const money = Core.formatMoney;
+  // Round only monetary line totals; quantities, areas and pricing formulas keep full precision.
+  const moneyCents = value => Math.round((value + Math.sign(value) * Number.EPSILON * Math.max(1, Math.abs(value))) * 100);
+  const roundMoney = value => Number.isFinite(value) ? moneyCents(value) / 100 : null;
   const qty = (value, unit) => Number.isFinite(value) ? `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(value)} ${unit}` : "—";
   const parseThicknessComposition = Core.parseThicknessComposition;
 
@@ -266,9 +269,9 @@
     }, 0);
   }
 
-  function applicableEdgeVolumeLevels(orderRunningM) {
+  function applicableEdgeVolumeLevels(orderRunningM, levels = data?.edgePriceLevels) {
     if (!Number.isFinite(orderRunningM) || orderRunningM <= 0) return [];
-    return (data?.edgePriceLevels || []).filter((level) => {
+    return (levels || []).filter((level) => {
       if (level?.scope !== "order_volume") return false;
       const min = num(level.minRunningM);
       const max = num(level.maxRunningM);
@@ -278,7 +281,7 @@
     });
   }
 
-  function automaticEdgePrice(priceRow, clientConditionId, orderRunningM) {
+  function automaticEdgePrice(priceRow, clientConditionId, orderRunningM, levels = data?.edgePriceLevels) {
     if (!priceRow || typeof priceRow !== "object") return null;
     const retail = num(priceRow.retail);
     const requestedConditionId = clientConditionId || "retail";
@@ -293,7 +296,7 @@
       volumePricingDeferred: !window.WoodstockPanelsView?.edgeVolumePricing
     };
     if (!window.WoodstockPanelsView?.edgeVolumePricing || !Number.isFinite(clientPrice)) return base;
-    const candidates = applicableEdgeVolumeLevels(orderRunningM)
+    const candidates = applicableEdgeVolumeLevels(orderRunningM, levels)
       .map(level => ({ level, price: num(priceRow[level.priceKey || level.id]) }))
       .filter(candidate => Number.isFinite(candidate.price) && candidate.price < base.price)
       .sort((a, b) => a.price - b.price);
@@ -436,6 +439,24 @@
     return document.body.classList.contains("quick-panels-page") && document.body.dataset.panelScenario === "details";
   }
 
+  function syncDetailedPaperBack() {
+    if (!isDetailedPanelCalculation()) return;
+    const thickness = selectedVeneerThickness();
+    const base = parseThicknessComposition(currentBaseThicknessRaw()).total;
+    const allowed = faceMaterialSelectionReady()
+      && Math.abs(thickness - 0.6) < 0.001
+      && Number.isFinite(base) && base > 0 && base <= 10;
+    if (!allowed && form.reverseSideSelect.value === "paper") {
+      form.reverseSideSelect.value = "rough";
+    }
+    const option = form.reverseSideSelect.querySelector('option[value="paper"]');
+    if (option) option.disabled = !allowed;
+    form.reverseSideHint.textContent = faceMaterialSelectionReady() && !allowed
+      && Number(form.veneeredSidesSelect.value) === 1
+      ? "Бумага возможна только при шпоне 0,6 мм и основе до 10 мм. Обратная сторона — черновой шпон."
+      : "";
+  }
+
   let quickPaperBackResetHint = "";
 
   function syncQuickPaperBack() {
@@ -471,7 +492,7 @@
   function twoSidedVeneerRequirementMessage() {
     return document.body.classList.contains("quick-panels-page")
       ? "Шпон толщиной 1,5 мм и более требует шпона с двух сторон."
-      : "Шпон толщиной 1,5 мм и более требует двух фанерованных сторон.";
+      : "Шпон толщиной 2 мм и более требует двух фанерованных сторон.";
   }
 
   function isQuickWallPanel() {
@@ -479,7 +500,12 @@
   }
 
   function requiresTwoFaceSides(thickness) {
-    return isQuickWallPanel() ? Number.isFinite(thickness) && thickness >= 2 - 0.001 : isAtLeastOnePointFive(thickness);
+    // В подробном расчёте шпон 1,5 мм допускает одну сторону с черновым
+    // шпоном на обороте или две лицевые стороны (Woodstock, 23.10).
+    if (isQuickWallPanel() || isDetailedPanelCalculation()) {
+      return Number.isFinite(thickness) && thickness >= 2 - 0.001;
+    }
+    return isAtLeastOnePointFive(thickness);
   }
 
   let quickWallPaperResetHint = "";
@@ -494,9 +520,9 @@
       const thin = faceReady && [0.6, 1, 1.5].some(value => Math.abs(thickness - value) < 0.001);
       const thick = faceReady && [2, 2.5].some(value => Math.abs(thickness - value) < 0.001);
       backExplanation.textContent = thin
-        ? "Обратная сторона панели закрывается черновым шпоном. Это шпон невысокого качества любой породы. После монтажа он не виден и нужен, чтобы панель не повело"
+        ? "Обратная сторона панели закрывается черновым шпоном. Это технический шпон любой породы, на нём допустимы природные особенности древесины. После монтажа его не видно, а нужен он, чтобы панель не повело"
         : thick
-          ? "На обратную сторону клеится более доступный шпон той же толщины, чтобы панель не повело. Он не покрывается лаком и после монтажа не виден"
+          ? "На обратной стороне используется тот же шпон, что и на лицевой стороне, той же толщины. Он нужен, чтобы панель не повело, не покрывается лаком и после монтажа не виден"
           : "";
       backExplanation.classList.toggle("is-hidden", !thin && !thick);
     }
@@ -521,23 +547,11 @@
     form.veneerSideBGrid.classList.toggle("is-hidden", !paperAllowed);
     form.veneerBFields.setAttribute("data-quick-hidden", "");
     form.layoutBField?.setAttribute("data-quick-hidden", "");
-    if (two && Math.abs(thickness - 2.5) < 0.001) {
-      const variants = (data?.veneers || []).filter(item => item.type === "natural"
-        && item.group === "ЯСЕНЬ БЕЛЫЙ" && sameConfirmedThickness(itemThickness(item), thickness));
-      const back = bestVeneerVariant(variants);
-      form.veneerBModeSelect.value = "other";
-      selectedVeneerBGroup = back;
-      selectedVeneerB = back;
-      form.veneerBInput.value = back ? veneerDisplayName(back) : "";
-      form.veneerBCutSelect.replaceChildren(new Option(back ? veneerCutLabel(back.veneerCut) : "", back?.veneerCut || ""));
-      form.veneerBCutSelect.value = back?.veneerCut || "";
-      form.veneerBCutField.classList.add("is-hidden");
-    } else {
-      form.veneerBModeSelect.value = "same";
-      selectedVeneerBGroup = null;
-      selectedVeneerB = null;
-      form.veneerBInput.value = "";
-    }
+    // Для 2 и 2,5 мм на сторону Б идёт шпон стороны А.
+    form.veneerBModeSelect.value = "same";
+    selectedVeneerBGroup = null;
+    selectedVeneerB = null;
+    form.veneerBInput.value = "";
     globalFinishSidesManual = false;
     form.finishSidesSelect.value = "1 сторона";
     positionFinishState.forEach((state, rowId) => positionFinishState.set(rowId, { ...state, sides: "1 сторона", sidesManual: false }));
@@ -573,7 +587,9 @@
 
   function normalizeFinishConfig(config, { allowInherit = false } = {}) {
     const source = config || {};
-    const rawFinishId = source.finishId || "none";
+    const rawFinishId = source.finishId === "lacquer"
+      ? (source.lacquerType === "polyurethane" ? "lacquer_polyurethane" : "lacquer_acrylic")
+      : (source.finishId || "none");
     if (allowInherit && rawFinishId === "inherit") {
       return {
         ...source,
@@ -652,6 +668,7 @@
     const parts = [];
     if (isGloss100Finish(normalized)) {
       parts.push("Глянец 100%");
+      parts.push(finishOption(normalized.finishId)?.name || (isPolyurethaneLacquer(normalized.finishId) ? "Лак полиуретановый" : "Лак акриловый"));
     } else {
       const option = finishOption(normalized.finishId);
       parts.push(option?.name || "Финиш");
@@ -706,9 +723,11 @@
     const normalized = normalizeFinishConfig(config);
     if (isGloss100Finish(normalized)) {
       return {
-        finishId: "lacquer",
+        finishId: normalized.finishId,
         finishType: "lacquer",
-        lacquerType: null,
+        lacquerType: lacquerTypeIdForFinish(normalized.finishId),
+        ...(normalized.source ? { source: normalized.source } : {}),
+        ...(typeof normalized.sidesManual === "boolean" ? { sidesManual: normalized.sidesManual } : {}),
         lacquerExecution: GLOSS_100_EXECUTION,
         lacquerGloss: "",
         lacquerProcess: "",
@@ -856,9 +875,21 @@
     return twoSidedRoughBackSelected() ? selectedRoughBackThickness() : selectedVeneerThickness();
   }
 
+  // Временное решение команды для краткого и подробного расчёта:
+  // черновой шпон 1 мм оцениваем по ставке 1,5 мм — 440 руб./м².
+  // Фактическая толщина остаётся 1 мм. Тариф и доплату подтвердить у WOODSTOCK.
+  const ROUGH_BACK_ONE_MM_TEMPORARY_RATE_PER_M2 = 440;
+  function roughBackOneMmTemporaryRateApplies() {
+    return Number(form.veneeredSidesSelect?.value) === 1 &&
+      form.reverseSideSelect?.value === "rough" &&
+      Math.abs(selectedVeneerThickness() - 1) < 0.001;
+  }
   function roughBackRateForThickness(value) {
     const thickness = num(value);
     if (!Number.isFinite(thickness)) return null;
+    if (Math.abs(thickness - 1) < 0.001 && roughBackOneMmTemporaryRateApplies()) {
+      return ROUGH_BACK_ONE_MM_TEMPORARY_RATE_PER_M2;
+    }
     const entry = Object.entries(roughBackRates()).find(([key]) => {
       const keyThickness = num(key);
       return Number.isFinite(keyThickness) && Math.abs(keyThickness - thickness) < 0.001;
@@ -1169,10 +1200,22 @@
     return /(?:\bAA\b|extra|экстра)/i.test(text);
   }
 
+  // Временное решение команды до подтверждения WOODSTOCK:
+  // при лицевом шпоне 2/2,5 мм стеновой панели сторона Б = та же позиция,
+  // что сторона А, с той же ценой вместо более дешёвого компенсатора.
+  function quickWallUsesFaceVeneerCompensator() {
+    if (!isQuickWallPanel()) return false;
+    const thickness = selectedVeneerThickness();
+    return [2, 2.5].some(value => Math.abs(thickness - value) < 0.001);
+  }
+  function backsideCategoryBRequired(item) {
+    return isFaceOnlyExtraVeneer(item) && !quickWallUsesFaceVeneerCompensator();
+  }
+
   function updateVeneerBModeLabel() {
     const sameOption = form.veneerBModeSelect?.querySelector('option[value="same"]');
     if (!sameOption) return;
-    sameOption.textContent = isFaceOnlyExtraVeneer(selectedVeneerA || selectedVeneerAGroup)
+    sameOption.textContent = backsideCategoryBRequired(selectedVeneerA || selectedVeneerAGroup)
       ? "Та же порода, категория B"
       : "Такой же, как сторона А";
   }
@@ -1362,10 +1405,16 @@
 
   function findEdgeNameGroup(typeId, value) {
     if (!typeId || !String(value || "").trim()) return null;
-    return edgeNameGroups(typeId)
-      .map((item) => ({ item, score: edgeGroupMatchScore(item.displayName, value) }))
-      .filter((entry) => entry.score > 0)
-      .sort((a, b) => b.score - a.score || b.item.displayName.length - a.item.displayName.length)[0]?.item || null;
+    // Preserve existing stock-family matching; order materials require exact names.
+    const groups = edgeNameGroups(typeId);
+    const stock = groups.filter(item => item.stockProgram)
+      .map(item => ({item, score: edgeGroupMatchScore(item.displayName, value)}))
+      .filter(entry => entry.score > 0)
+      .sort((a,b) => b.score-a.score || b.item.displayName.length-a.item.displayName.length)[0]?.item;
+    if (stock) return stock;
+    const matches = groups.filter(item => !item.stockProgram && [item.displayName,...(item.aliases || [])]
+      .some(name => normalizeEdgeLookup(name) === normalizeEdgeLookup(value)));
+    return matches.length === 1 ? matches[0] : null;
   }
 
   function edgeTypeById(typeId) {
@@ -1408,7 +1457,31 @@
   }
 
   function edgeCatalogItems(typeId = "") {
-    return (data?.edgeCatalog || []).filter((item) => !typeId || item.typeId === typeId);
+    return [...(data?.edgeCatalog || []),...(data?.orderedEdgeCatalog || [])].filter(item => !typeId || item.typeId === typeId);
+  }
+
+  function edgeCatalogWidths(item) {
+    if (!item?.orderedProgram) return item?.availableWidths || [];
+    const min=Math.ceil(Number(item.widthRangeMm?.min)), max=Math.floor(Number(item.widthRangeMm?.max));
+    return Number.isFinite(min) && Number.isFinite(max) && min>0 && max>=min
+      ? Array.from({length:max-min+1},(_,i)=>min+i) : [];
+  }
+
+  function edgeCatalogPriceRow(item,width) {
+    if (!item || !edgeCatalogWidths(item).includes(Number(width))) return null;
+    if (!item.orderedProgram) return item.pricesPerRunningM?.[String(width)] || null;
+    return Object.fromEntries(Object.entries(item.pricesPerM2 || {}).map(([key,price])=>
+      [key,Number.isFinite(price) && price>0 ? price*width/1000 : null]));
+  }
+
+  function edgeWidthPeers(item) {
+    return item ? edgeCatalogItems(item.typeId).filter(other =>
+      normalizeEdgeLookup(other.veneerName || other.displayName) === normalizeEdgeLookup(item.veneerName || item.displayName) &&
+      (edgeTypeById(item.typeId)?.thicknessMode === "none" || Number(other.thicknessMm) === Number(item.thicknessMm))) : [];
+  }
+
+  function edgeAvailableWidths(item) {
+    return [...new Set(edgeWidthPeers(item).flatMap(edgeCatalogWidths))].sort((a,b)=>a-b);
   }
 
   function edgeNameGroups(typeId) {
@@ -1421,6 +1494,8 @@
         id: `edge_name:${typeId}:${key}`,
         displayName: label,
         veneerName: item.veneerName || label,
+        stockProgram: !item.orderedProgram,
+        aliases: item.aliases || [],
         typeId
       });
     });
@@ -1470,12 +1545,15 @@
       normalizeEdgeLookup(item.veneerName || item.displayName) === normalizeEdgeLookup(group.displayName));
     const boundId = controls.materialInput?.dataset?.catalogItemId || "";
     const bound = boundId ? candidates.find((item) => item.id === boundId) : null;
-    if (type.thicknessMode === "none") return bound || candidates[0] || null;
+    const requestedWidth = Object.prototype.hasOwnProperty.call(options,"widthMm") ? num(options.widthMm) : num(controls.widthSelect.value);
+    const byWidth = list => list.find(item => !item.orderedProgram && edgeCatalogWidths(item).includes(requestedWidth))
+      || list.find(item => item.orderedProgram && edgeCatalogWidths(item).includes(requestedWidth))
+      || list.find(item => !item.orderedProgram) || list[0] || null;
+    if (type.thicknessMode === "none") return byWidth(candidates);
     const hasOverride = Object.prototype.hasOwnProperty.call(options, "thicknessMm");
     const thickness = hasOverride ? num(options.thicknessMm) : currentEdgeThickness(which);
     if (!Number.isFinite(thickness)) return null;
-    if (bound && Number.isFinite(num(bound.thicknessMm)) && Math.abs(num(bound.thicknessMm) - thickness) < 0.001) return bound;
-    return candidates.find((item) => Number.isFinite(num(item.thicknessMm)) && Math.abs(num(item.thicknessMm) - thickness) < 0.001) || null;
+    return byWidth(candidates.filter(item => Number.isFinite(num(item.thicknessMm)) && Math.abs(num(item.thicknessMm)-thickness)<0.001));
   }
 
   function syncEdgeThicknessOptions(which = "attached", { preserve = true } = {}) {
@@ -1593,13 +1671,15 @@
 
     controls.materialInput.dataset.catalogItemId = item.id;
     controls.widthSelect.add(new Option("Выберите ширину кромки", ""));
-    const widths = (item.availableWidths || []).filter((width) => edgeWidthFitsProduct(width)).sort((a, b) => a - b);
+    const widths = edgeAvailableWidths(item).filter(edgeWidthFitsProduct).sort((a,b)=>a-b);
     widths.forEach((width) => controls.widthSelect.add(new Option(`${width} мм`, String(width))));
     controls.widthSelect.disabled = false;
     if (!edgeWidthAutomatic[which] && Number.isFinite(previous) && widths.includes(previous)) {
       controls.widthSelect.value = String(previous);
     } else if (widths.length) {
-      controls.widthSelect.value = String(widths[0]);
+      // New order widths do not change an existing automatic stock choice.
+      const stockWidths=edgeWidthPeers(item).filter(other=>!other.orderedProgram).flatMap(edgeCatalogWidths).filter(edgeWidthFitsProduct).sort((a,b)=>a-b);
+      controls.widthSelect.value = String(stockWidths[0] || widths[0]);
       edgeWidthAutomatic[which] = true;
     }
   }
@@ -1617,8 +1697,11 @@
     const face = selectedVeneerThickness();
     if (!Number.isFinite(base) || base <= 0 || !Number.isFinite(face)) return null;
     const two = Number(form.veneeredSidesSelect.value) === 2;
+    // Для расчёта итоговой толщины бумага на стороне Б = 0 мм.
+    // Толщина бумаги не требуется для выбора кромки: запас учитывается отдельно.
     const back = two ? calibrationSideBThicknessMm()
-      : form.reverseSideSelect.value === "rough" ? roughBackThicknessForCurrentSelection() : null;
+      : form.reverseSideSelect.value === "rough" ? roughBackThicknessForCurrentSelection()
+        : form.reverseSideSelect.value === "paper" ? 0 : null;
     return Number.isFinite(back) ? base + face + back : null;
   }
 
@@ -1629,7 +1712,8 @@
     if (!Number.isFinite(base) || !Number.isFinite(face)) return null;
     const back = Number(form.veneeredSidesSelect.value) === 2
       ? calibrationSideBThicknessMm()
-      : form.reverseSideSelect.value === "rough" ? roughBackThicknessForCurrentSelection() : null;
+      : form.reverseSideSelect.value === "rough" ? roughBackThicknessForCurrentSelection()
+        : form.reverseSideSelect.value === "paper" ? 0 : null;
     if (!Number.isFinite(back)) return null;
     const confirmed = confirmedFinishedThicknessAfterCalibrationMm(base);
     return Number.isFinite(confirmed) ? confirmed : base + face + back;
@@ -1639,8 +1723,11 @@
     const value = num(width);
     if (!Number.isFinite(value)) return false;
     if (isDetailedPanelCalculation()) {
+      // Для кромки, продаваемой отдельно, ширина не зависит от толщины плиты.
+      if (form.edgeModeSelect.value !== "attached") return value > 0;
+      // Рабочее правило из краткого расчёта: припуск 2 мм с каждой стороны.
       const thickness = detailedFinishedThicknessMm();
-      return Number.isFinite(thickness) && value > thickness;
+      return Number.isFinite(thickness) && value + 1e-9 >= thickness + 4;
     }
     const finished = quickPanelFinishedThicknessMm();
     return Number.isFinite(finished) ? value + 1e-9 >= finished + 4 : value > minimumAttachedEdgeWidth();
@@ -1664,7 +1751,7 @@
     const group = edgeNameGroupForInput(which);
     const hasThicknessOverride = Object.prototype.hasOwnProperty.call(options, "thicknessMm");
     const thickness = hasThicknessOverride ? num(options.thicknessMm) : currentEdgeThickness(which);
-    const item = resolveEdgeCatalogItem(which, { thicknessMm: thickness });
+    const item = resolveEdgeCatalogItem(which, {thicknessMm:thickness,...(Object.prototype.hasOwnProperty.call(options,"widthMm")?{widthMm:options.widthMm}:{})});
     const thicknessRequired = Boolean(type && (type.thicknessMode !== "none" || isQuickWallPanel() && which === "attached"));
     const customOrder = Boolean(type && rawName && (!group || (group && thicknessRequired && Number.isFinite(thickness) && !item)));
     const selectedStockWidth = Object.prototype.hasOwnProperty.call(options, "widthMm") ? num(options.widthMm) : num(controls.widthSelect.value);
@@ -1674,21 +1761,24 @@
       : customOrder
         ? (Number.isFinite(requestedOrderWidth) ? requestedOrderWidth : selectedStockWidth)
         : null;
-    const stockProgram = Boolean(item && Number.isFinite(width) && (item.availableWidths || []).some((value) => Number(value) === width));
+    const catalogPriced = Boolean(item && Number.isFinite(width) && edgeCatalogWidths(item).includes(width));
+    const stockProgram = Boolean(catalogPriced && !item.orderedProgram);
+    const orderedProgram = Boolean(catalogPriced && item.orderedProgram);
     const selectedClientConditionId = form.clientConditionSelect.value || "retail";
-    const priceRow = stockProgram ? item?.pricesPerRunningM?.[String(width)] : null;
+    const priceRow = catalogPriced ? edgeCatalogPriceRow(item,width) : null;
     const orderRunningM = Number.isFinite(num(options.orderRunningM)) ? num(options.orderRunningM) : null;
-    const automaticPrice = stockProgram ? automaticEdgePrice(priceRow, selectedClientConditionId, orderRunningM) : null;
+    const priceLevels = item?.orderedProgram ? data.orderedEdgePriceLevels : data.edgePriceLevels;
+    const automaticPrice = catalogPriced ? automaticEdgePrice(priceRow,selectedClientConditionId,orderRunningM,priceLevels) : null;
     const manualOrderPricePerM2 = !isDetailedPanelCalculation() && customOrder ? num(controls.orderPriceInput?.value) : null;
     const manualOrderPricePerRunningM = customOrder && Number.isFinite(manualOrderPricePerM2) && Number.isFinite(width)
       ? manualOrderPricePerM2 * width / 1000
       : null;
     const conditionId = customOrder ? "manual_order_price" : (automaticPrice?.id || selectedClientConditionId || "retail");
-    const conditionName = customOrder ? "Цена заказной кромки по согласованию" : (automaticPrice?.name || clientConditionUiName(selectedClientConditionId));
+    const conditionName = customOrder ? "Цена заказной кромки по согласованию" : [automaticPrice?.name || clientConditionUiName(selectedClientConditionId),item?.source].filter(Boolean).join(" · ");
     const conditionSource = customOrder ? "manual_order_price" : (automaticPrice?.source || "missing_price");
     const pricePerRunningM = customOrder ? manualOrderPricePerRunningM : num(automaticPrice?.price);
     const retailPricePerRunningM = customOrder ? manualOrderPricePerRunningM : num(priceRow?.retail);
-    const volumePriceLevels = stockProgram ? {
+    const volumePriceLevels = catalogPriced ? {
       volume1000_2999: Number.isFinite(num(priceRow?.volume1000_2999)) ? num(priceRow.volume1000_2999) : null,
       volume2999_4999: Number.isFinite(num(priceRow?.volume2999_4999)) ? num(priceRow.volume2999_4999) : null,
       volume5000_plus: Number.isFinite(num(priceRow?.volume5000_plus)) ? num(priceRow.volume5000_plus) : null
@@ -1708,10 +1798,13 @@
     else if (!Number.isFinite(width) || width <= 0) validationError = "Выберите или укажите ширину кромки.";
 
     if (!validationError && customOrder && Number.isFinite(manualOrderPricePerM2) && manualOrderPricePerM2 < 0) validationError = "Цена заказной кромки не может быть отрицательной.";
+    if (!validationError && item?.orderedProgram && !catalogPriced) validationError = `Ширина заказной кромки должна быть от ${item.widthRangeMm.min} до ${item.widthRangeMm.max} мм.`;
     if (!validationError && isDetailedPanelCalculation() && which === "attached" && !Number.isFinite(detailedFinishedThicknessMm())) validationError = "Итоговая толщина изделия не определена: нужны подтверждённые толщины облицовки обеих сторон.";
-    if (!validationError && (which === "attached" || isQuickStandardPanel() && which === "separate") && Number.isFinite(width) && !edgeWidthFitsProduct(width)) validationError = Number.isFinite(quickPanelFinishedThicknessMm())
-      ? "Ширина кромки должна быть больше итоговой толщины изделия минимум на 4 мм."
-      : "Ширина кромки должна превышать толщину детали.";
+    if (!validationError && (which === "attached" || isQuickStandardPanel() && which === "separate") && Number.isFinite(width) && !edgeWidthFitsProduct(width)) validationError = isDetailedPanelCalculation()
+      ? "Ширина кромки для кромления должна превышать итоговую толщину изделия минимум на 4 мм."
+      : Number.isFinite(quickPanelFinishedThicknessMm())
+        ? "Ширина кромки должна превышать итоговую толщину изделия минимум на 4 мм."
+        : "Ширина кромки должна превышать толщину детали.";
 
     return {
       which,
@@ -1727,6 +1820,10 @@
       hasFleece: item?.hasFleece ?? type?.hasFleece ?? null,
       catalogItem: item,
       catalogItemId: item?.id || null,
+      priceCatalogSource: item?.source || null,
+      priceCatalogUrl: item?.sourceUrl || null,
+      priceCatalogCell: item?.sourceCell || null,
+      orderedProgram,
       stockProgram,
       orderPosition: Boolean(customOrder || (rawName && !stockProgram)),
       customOrder,
@@ -1739,9 +1836,9 @@
       pricePerRunningM: Number.isFinite(pricePerRunningM) ? pricePerRunningM : null,
       manualOrderPricePerM2: Number.isFinite(manualOrderPricePerM2) ? manualOrderPricePerM2 : null,
       conditionUnresolved: Boolean(automaticPrice?.conditionUnresolved),
-      volumePricingDeferred: Boolean(stockProgram && automaticPrice?.volumePricingDeferred),
+      volumePricingDeferred: Boolean(catalogPriced && automaticPrice?.volumePricingDeferred),
       volumePriceLevels,
-      volumePriceRanges: stockProgram ? (data.edgePriceLevels || []).filter(level => level.scope === "order_volume").map(level => ({ ...level })) : null,
+      volumePriceRanges: catalogPriced ? (priceLevels || []).filter(level => level.scope === "order_volume").map(level => ({ ...level })) : null,
       operationRateClass,
       valid: !validationError,
       validationError
@@ -1867,14 +1964,12 @@
       return false;
     }
 
-    setSeparateEdgeMetersError("");
-    if (value < data.meta.edgeSeparateMinimumRunningM) {
-      setSeparateEdgeMetersWarning(`Менее ${data.meta.edgeSeparateMinimumRunningM} пог. м: минимум пока не подтверждён на уровне одной позиции. Проверьте общий метраж заявки.`);
-    } else {
-      setSeparateEdgeMetersWarning("");
-    }
+    const minimum = separateEdgeMinimumMeters();
+    const valid = value >= minimum;
+    setSeparateEdgeMetersError(valid ? "" : `Минимальный заказ кромки — ${minimum} пог. м.`);
+    setSeparateEdgeMetersWarning("");
     recalc();
-    return true;
+    return valid;
   }
 
   function sizeRowSupportsAttachedEdge(row) {
@@ -1918,6 +2013,7 @@
     clearPriceOverrides("veneer:A:");
     clearPriceOverrides("veneer:B:");
     clearPriceOverrides("mixmatch:");
+    clearPriceOverrides("mixmatch-material:");
     clearPriceOverrides("veneer-actual:");
     veneerAPriceAuto = true;
     veneerBPriceAuto = true;
@@ -2017,7 +2113,7 @@
     const condition = form.clientConditionSelect.value || "retail";
     if (condition !== "retail") {
       const clientPrice = num(item.prices?.[clientConditionPriceKey(condition)]);
-      if (Number.isFinite(clientPrice)) {
+      if (Number.isFinite(clientPrice) && clientPrice >= 0) {
         candidates.push({
           id: `client:${condition}`,
           source: "client",
@@ -2032,7 +2128,7 @@
     // Для нестандарта здесь меняется только применение общего условия клиента.
     if (pricingMode !== "nonstandard") {
       const volumeLevel = Core.automaticVeneerLevel(item, basis.area, basis.sheets);
-      if (volumeLevel?.id && volumeLevel.id !== "retail" && Number.isFinite(volumeLevel.price)) {
+      if (volumeLevel?.id && volumeLevel.id !== "retail" && Number.isFinite(volumeLevel.price) && volumeLevel.price >= 0) {
         candidates.push({
           id: `volume:${volumeLevel.id}`,
           source: "volume",
@@ -2050,7 +2146,8 @@
     const basis = basisOverride && Number.isFinite(num(basisOverride.area))
       ? { area: num(basisOverride.area), sheets: Number.isFinite(num(basisOverride.sheets)) ? num(basisOverride.sheets) : null, exact: basisOverride.exact !== false }
       : Core.veneerVolumeBasis(item, requiredArea);
-    const retailPrice = num(item.prices?.retail);
+    const retailPriceRaw = num(item.prices?.retail);
+    const retailPrice = Number.isFinite(retailPriceRaw) && retailPriceRaw >= 0 ? retailPriceRaw : null;
     const retailPricePerM2 = veneerPricePerM2(item, retailPrice);
     const requestedCondition = form.clientConditionSelect.value || "retail";
     const applicable = veneerConditionCandidates(item, basis, pricingMode);
@@ -2129,6 +2226,7 @@
     clearPriceOverrides("veneer:A:");
     clearPriceOverrides("veneer:B:");
     clearPriceOverrides("mixmatch:");
+    clearPriceOverrides("mixmatch-material:");
     clearPriceOverrides("veneer-actual:");
     veneerAPriceAuto = true;
     veneerBPriceAuto = true;
@@ -2354,9 +2452,13 @@
 
     if (form.calibrationDepthNote) {
       const rate = calibrationRatePerM2PerMm();
-      form.calibrationDepthNote.textContent = Number.isFinite(rate)
-        ? `Рассчитывается автоматически: исходная толщина основы − толщина после калибровки. Тариф ${money(rate)}/м² за каждый 1 мм съёма.`
-        : "Рассчитывается автоматически: исходная толщина основы − толщина после калибровки.";
+      const requiresProductionPrice = isDetailedPanelCalculation() &&
+        (operationPriceComesFromProduction(base) || selectedBasePriceMode() === "production");
+      form.calibrationDepthNote.textContent = requiresProductionPrice
+        ? "Рассчитывается автоматически: исходная толщина основы − толщина после калибровки. Стоимость калибровки уточняется производством."
+        : Number.isFinite(rate)
+          ? `Рассчитывается автоматически: исходная толщина основы − толщина после калибровки. Тариф ${money(rate)}/м² за каждый 1 мм съёма.`
+          : "Рассчитывается автоматически: исходная толщина основы − толщина после калибровки.";
     }
   }
 
@@ -2378,6 +2480,10 @@
         return `<option value="${esc(raw)}">${esc(label)}</option>`;
       }).join("");
       if (options.length === 1) form.baseThicknessSelect.value = String(options[0]);
+      // Краткий расчёт стеновых панелей: для ДСП с единственной толщиной
+      // значение выбирается автоматически, но поле остаётся на своём месте.
+      // Блокируем только изменение select, не его отображение и не значение.
+      form.baseThicknessSelect.disabled = isQuickWallPanel() && base.id === "dsp" && options.length === 1;
     }
 
     updateBaseProductionCostHint(); updateThicknessWarnings(); updateEdgeUI(); updateCalibrationUI(); renderStandardSizes(); revalidateCustomSizeRows(); recalc();
@@ -2390,6 +2496,22 @@
       ? data?.baseThicknessPriceModes?.[base.id]?.[thicknessKey]
       : null;
     const scenarios = data?.baseThicknessScenarioPriceModes?.[base?.id]?.[thicknessKey];
+    if (isDetailedPanelCalculation()) {
+      const sizes = readSizeRows().filter((size) => size.mode && size.length > 0 && size.width > 0);
+      const fixedProductionMode = base?.priceMode === "production"
+        || (base?.id === "mdf" && thicknessKey === "6+6+6");
+      const needsProduction = fixedProductionMode || (thicknessKey && (scenarios
+        ? sizes.some((size) => selectedBasePriceMode(size) === "production")
+        : selectedBasePriceMode() === "production"));
+      const scenarioUndetermined = !fixedProductionMode && scenarios && !sizes.length;
+      form.baseProductionCostHint.classList.toggle("is-hidden", !needsProduction && !scenarioUndetermined);
+      form.baseProductionCostHint.textContent = needsProduction
+        ? "Автоматический расчёт стоимости недоступен для выбранной основы или части позиций. Запросите стоимость у производства и добавьте её на странице общей спецификации."
+        : scenarioUndetermined
+          ? "Возможность автоматического расчёта стоимости зависит от размера и параметров изготовления. Если цены нет, запросите стоимость у производства и добавьте её на странице общей спецификации."
+          : "";
+      return;
+    }
     if (scenarios) {
       const sizes = readSizeRows().filter((size) => size.mode && size.length > 0 && size.width > 0);
       const needsProduction = sizes.some((size) => selectedBasePriceMode(size) === "production");
@@ -2551,6 +2673,7 @@
     form.veneerSideBGrid?.classList.toggle("is-hidden", !faceReady || two);
     syncQuickWallBack();
     syncQuickPaperBack();
+    syncDetailedPaperBack();
     if (!other) {
       clearTouchedFields("veneerB", "veneerBCut", "veneerBPrice", "veneerBCondition");
       selectedVeneerBGroup = null;
@@ -2599,7 +2722,10 @@
   function updateLayoutUI() {
     const layout = effectiveLayoutId();
     const layoutNeeded = needsLayoutSelection();
-    if (layout !== "mixmatch") clearPriceOverrides("mixmatch:");
+    if (layout !== "mixmatch") {
+      clearPriceOverrides("mixmatch:");
+      if (effectiveLayoutBId() !== "mixmatch") clearPriceOverrides("mixmatch-material:");
+    }
     clearPriceOverrides("veneer-actual:");
     syncVeneerCutUI(true);
     syncVeneerBCutUI(true);
@@ -2629,11 +2755,12 @@
       : "";
 
     const mixMatch = result?.mixMatchVeneerPricing;
-    const showMixMatch = layout === "mixmatch" && Boolean(mixMatch?.applies) && Number.isFinite(mixMatch?.actualVeneerAreaM2);
+    const detailedMixMatch = isDetailedPanelCalculation() ? (result?.veneerConsumptions || []).find(x => x.mixMatchControlled) : null;
+    const showMixMatch = detailedMixMatch ? Number.isFinite(detailedMixMatch.mixMatchMaterialAreaM2) : layout === "mixmatch" && Boolean(mixMatch?.applies) && Number.isFinite(mixMatch?.actualVeneerAreaM2);
     form.mixMatchWarning.classList.toggle("is-hidden", !showMixMatch);
-    form.mixMatchWarning.textContent = showMixMatch
-      ? `Для MixMatch заложено: ${round(mixMatch.actualVeneerAreaM2, 2)} м² шпона. Ориентир — минимум ${mixMatch.minimumPacks || 3} пачки; фактический объём можно скорректировать в блоке расчётных условий.`
-      : "";
+    form.mixMatchWarning.textContent = detailedMixMatch && showMixMatch
+      ? `MixMatch: для материала «${detailedMixMatch.materialName}» заложено ${round(detailedMixMatch.mixMatchMaterialAreaM2, 2)} м². Ориентир — 50 м² для трёх пачек; фактический объём уточняется в расчётных условиях.`
+      : showMixMatch ? `Для MixMatch заложено: ${round(mixMatch.actualVeneerAreaM2, 2)} м² шпона. Ориентир — минимум ${mixMatch.minimumPacks || 3} пачки; фактический объём можно скорректировать в блоке расчётных условий.` : "";
     syncVeneerInfoMessagesVisibility();
   }
 
@@ -2986,8 +3113,13 @@
     const limit = finishedDetailTechnologicalLimit(size);
     if (!limit) return { valid: true, limit: null };
 
-    const biggerSide = Math.max(Number(size.length) || 0, Number(size.width) || 0);
-    const smallerSide = Math.min(Number(size.length) || 0, Number(size.width) || 0);
+    // Нестандартный полуфабрикат проверяем по фактической заготовке с +20 мм,
+    // а готовую деталь и стандартную панель — по их собственному размеру.
+    const allowanceBlank = isDetailedPanelCalculation() && manufacturingTypeForSize(size) === "allowance20";
+    const limitLength = allowanceBlank ? size.calcLength : size.length;
+    const limitWidth = allowanceBlank ? size.calcWidth : size.width;
+    const biggerSide = Math.max(Number(limitLength) || 0, Number(limitWidth) || 0);
+    const smallerSide = Math.min(Number(limitLength) || 0, Number(limitWidth) || 0);
     const maxLength = num(limit.maxLengthMm);
     const maxWidth = num(limit.maxWidthMm);
     const valid = (!Number.isFinite(maxLength) || biggerSide <= maxLength) &&
@@ -3042,9 +3174,11 @@
       </div>
 
       <label class="field is-hidden" data-size-manufacturing-field>
-        <span class="field__label">Тип изготовления</span>
+        <span class="field__label">${isDetailedPanelCalculation() ? "Тип изделия" : "Тип изготовления"}</span>
         <select data-size-manufacturing-type></select>
-        <span class="field__note is-hidden" data-size-allowance-note>Размер изготовления будет увеличен на 20 мм по длине и ширине — по 10 мм с каждой стороны. Чистовой пил выполняет клиент.</span>
+        ${isDetailedPanelCalculation()
+                  ? '<span class="field__note is-hidden" data-size-manufacturing-note></span>'
+                  : '<span class="field__note is-hidden" data-size-allowance-note>Размер изготовления будет увеличен на 20 мм по длине и ширине — по 10 мм с каждой стороны. Чистовой пил выполняет клиент.</span>'}
       </label>
 
       <select data-size-standard-order hidden aria-hidden="true">
@@ -3058,12 +3192,12 @@
 
       <div class="field-grid field-grid--size-row is-hidden" data-size-fields>
         <label class="field">
-          <span class="field__label">Длина, мм — направление волокон</span>
+          <span class="field__label" data-size-length-label>Длина, мм — направление волокон</span>
           <input data-size-length type="number" min="1" step="1" value="${esc(values.length || "")}" />
           <span class="field__error" data-size-length-error></span>
         </label>
         <label class="field">
-          <span class="field__label">Ширина, мм</span>
+          <span class="field__label" data-size-width-label>Ширина, мм</span>
           <input data-size-width type="number" min="1" step="1" value="${esc(values.width || "")}" />
           <span class="field__error" data-size-width-error></span>
         </label>
@@ -3073,6 +3207,8 @@
           <span class="field__error" data-size-quantity-error></span>
         </label>
       </div>
+
+      ${isDetailedPanelCalculation() ? '<p class="field__note is-hidden" data-size-calculated-result></p>' : ''}
 
       <div class="size-row__extra" data-size-extra>
         <label class="toggle-line">
@@ -3191,13 +3327,13 @@
     const current = preferred || select.value || manufacturingTypeForRow(row);
     const options = mode === "standard"
       ? [
-          { id: "standard", name: "Стандартная панель (полуфабрикат без чистового пила)" },
-          { id: "exact", name: "Готовая деталь (в точный размер)" }
+          { id: "standard", name: isDetailedPanelCalculation() ? "Стандартная панель" : "Стандартная панель (полуфабрикат без чистового пила)" },
+          { id: "exact", name: isDetailedPanelCalculation() ? "Деталь в чистовой размер" : "Готовая деталь (в точный размер)" }
         ]
       : mode === "custom"
         ? [
-            { id: "exact", name: "Готовая деталь (в точный размер)" },
-            { id: "allowance20", name: "С припуском +20 мм (полуфабрикат без чистового пила)" }
+            { id: "exact", name: isDetailedPanelCalculation() ? "Деталь в чистовой размер" : "Готовая деталь (в точный размер)" },
+            { id: "allowance20", name: isDetailedPanelCalculation() ? "Нестандартный полуфабрикат" : "С припуском +20 мм (полуфабрикат без чистового пила)" }
           ]
         : [];
 
@@ -3206,6 +3342,46 @@
     const fallback = mode === "standard" ? "standard" : mode === "custom" ? "exact" : "";
     select.value = allowed.has(current) ? current : fallback;
     syncLegacySizeFields(row);
+  }
+
+  function updateDetailedManufacturingDescription(row, mode, manufacturingType) {
+    const note = $('[data-size-manufacturing-note]', row);
+    const calculated = $('[data-size-calculated-result]', row);
+    const lengthLabel = $('[data-size-length-label]', row);
+    const widthLabel = $('[data-size-width-label]', row);
+    const descriptions = {
+      standard: "Панель выбранного стандартного формата без чистового распила. Если нужен точный размер, выберите «Деталь в чистовой размер».",
+      exact: "Чистовой распил выполняется на производстве по указанным размерам. Кромление и финишное покрытие выбираются отдельно.",
+      allowance20: "Укажите размер, который клиент хочет получить после собственного чистового распила. Для расчёта прибавляем по 20 мм к длине и ширине заготовки."
+    };
+    if (note) {
+      note.textContent = mode ? descriptions[manufacturingType] || "" : "";
+      note.classList.toggle("is-hidden", !note.textContent);
+    }
+    const standard = manufacturingType === "standard";
+    const allowance = manufacturingType === "allowance20";
+    if (lengthLabel) lengthLabel.textContent = standard
+      ? "Длина панели, мм — направление волокон"
+      : allowance ? "Желаемая длина детали, мм — направление волокон"
+      : "Чистовая длина детали, мм — направление волокон";
+    if (widthLabel) widthLabel.textContent = standard
+      ? "Ширина панели, мм"
+      : allowance ? "Желаемая ширина детали, мм"
+      : "Чистовая ширина детали, мм";
+    const length = num($('[data-size-length]', row)?.value);
+    const width = num($('[data-size-width]', row)?.value);
+    const hasDimensions = mode && Number.isFinite(length) && length > 0 && Number.isFinite(width) && width > 0;
+    let result = "";
+    if (hasDimensions && allowance) {
+      result = `Расчётный размер заготовки: ${length + 20} × ${width + 20} мм. Полуфабрикат без чистового распила: точные размеры и геометрия не гарантируются.`;
+    } else if (hasDimensions && mode === "standard" && manufacturingType === "exact") {
+      const source = standardSourceDimensions(row);
+      if (source) result = `Исходная стандартная панель: ${source.length} × ${source.width} мм. Чистовой размер детали: ${length} × ${width} мм.`;
+    }
+    if (calculated) {
+      calculated.textContent = result;
+      calculated.classList.toggle("is-hidden", !result);
+    }
   }
 
   function updateSizeRowAvailability(row) {
@@ -3218,6 +3394,7 @@
     fields?.classList.toggle("is-hidden", !mode);
     manufacturingField?.classList.toggle("is-hidden", !mode);
     allowanceNote?.classList.toggle("is-hidden", manufacturingType !== "allowance20");
+    if (isDetailedPanelCalculation()) updateDetailedManufacturingDescription(row, mode, manufacturingType);
     updateSizeTransitionUI(row);
   }
 
@@ -3334,6 +3511,11 @@
       const calcWidth = allowance && width ? width + allowance : width;
       const productionAllowance = productionFitAllowanceMm(manufacturingType);
       const needsProductionFitCheck = ["exact", "allowance20"].includes(manufacturingType);
+      // После смены основы/толщины не превращаем прежний стандарт в готовую деталь.
+      const selectedStandardSource = mode === "standard" && manufacturingType === "exact"
+        ? standardSourceDimensions(row) : { length, width };
+      const standardSizeAvailable = !isDetailedPanelCalculation() || mode !== "standard" ||
+        Boolean(selectedStandardSource && isKnownStandardSize(selectedStandardSource));
       const fitKnown = needsProductionFitCheck && length > 0 && width > 0;
       const productionFitUnconfirmed = isDetailedPanelCalculation() && fitKnown &&
         (!productionSourceFormatsForBase().length || !sizeFitsProduction(length, width, productionAllowance));
@@ -3356,6 +3538,7 @@
         resultMode,
         physicalSizeValid,
         productionFitUnconfirmed,
+        standardSizeAvailable,
         calcLength,
         calcWidth,
         transition: !isQuickWallPanel() && !isQuickDetailsPanel() && !isQuickStandardPanel() && Boolean($('[data-size-transition]', row)?.checked),
@@ -3368,7 +3551,7 @@
       size.technologicalSizeValid = technologicalState.valid;
       size.technologicalSizeLimit = technologicalState.limit;
       size.minimumSizeValid = manufacturingType !== "exact" || !(length > 0 && width > 0) || (length >= 50 && width >= 50);
-      size.sizeValid = physicalSizeValid && technologicalState.valid && size.minimumSizeValid;
+      size.sizeValid = physicalSizeValid && technologicalState.valid && size.minimumSizeValid && standardSizeAvailable;
       size.area = length && width && quantity && size.sizeValid ? length * width * quantity / 1_000_000 : 0;
       size.calcArea = calcLength && calcWidth && quantity && size.sizeValid ? calcLength * calcWidth * quantity / 1_000_000 : 0;
       return size;
@@ -3463,7 +3646,10 @@
     }
 
     if (!pairs.length) {
-      target.innerHTML = "<span>Для выбранной толщины стандартные размеры не найдены</span>";
+      target.innerHTML = "<span>Для выбранной толщины стандартные размеры не найдены</span>" +
+        (isDetailedPanelCalculation() && row.dataset.sizeMode === "standard"
+          ? '<p class="field__error" role="alert">Выбранный ранее стандартный формат недоступен. Выберите другой формат или укажите свой размер.</p>'
+          : "");
       return;
     }
 
@@ -3476,7 +3662,9 @@
     const comparisonWidth = row.dataset.sizeMode === "standard" && manufacturingType === "exact" && Number.isFinite(sourceWidth) ? sourceWidth : currentWidth;
     const stillStandard = sizes.some((size) => size.length === comparisonLength && size.width === comparisonWidth);
 
-    if (row.dataset.sizeMode === "standard" && !stillStandard) {
+    if (row.dataset.sizeMode === "standard" && !stillStandard && !isDetailedPanelCalculation()) {
+      // В кратком расчёте оставляем прежнее поведение. В подробном расчёте
+      // не изменяем тип изделия без явного выбора менеджера.
       row.dataset.sizeMode = "custom";
       delete row.dataset.sourceStandardLength;
       delete row.dataset.sourceStandardWidth;
@@ -3486,7 +3674,10 @@
       updateSizeRowAvailability(row);
     }
 
-    target.innerHTML = pairs.map((size) => {
+    const unavailableStandardWarning = isDetailedPanelCalculation() && row.dataset.sizeMode === "standard" && !stillStandard
+      ? '<p class="field__error" role="alert">Выбранный ранее стандартный формат недоступен для текущей основы и толщины. Выберите другой стандартный формат или укажите свой размер. Параметры позиции сохранены.</p>'
+      : "";
+    target.innerHTML = unavailableStandardWarning + pairs.map((size) => {
       const active = row.dataset.sizeMode === "standard" &&
         comparisonLength === size.length &&
         comparisonWidth === size.width;
@@ -3732,7 +3923,7 @@
   }
 
   function separateEdgeMinimumMeters() {
-    return isDetailedPanelCalculation() ? null : isQuickStandardPanel() ? 50 : num(data?.meta?.edgeSeparateMinimumRunningM);
+    return num(data?.meta?.edgeSeparateMinimumRunningM) ?? 50;
   }
 
   function separateEdgeAutomaticMeters() {
@@ -3756,14 +3947,10 @@
     form.separateEdgeMetersReset?.classList.toggle("is-hidden", !separateEdgeMetersManual);
     if (form.separateEdgeMetersSummary) form.separateEdgeMetersSummary.textContent =
       `${separateEdgeMetersManual ? "Ручная корректировка. " : ""}По размерам и выбранным торцам: ${round(meters, 2)} пог. м. Запас не добавлен.`;
-    if (isDetailedPanelCalculation()) {
-      setSeparateEdgeMetersWarning("Минимальный объём изготовления заказной кромки требует согласования.");
-      return;
-    }
     const selected = num(form.separateEdgeMetersInput.value);
     const minimum = separateEdgeMinimumMeters();
     setSeparateEdgeMetersWarning(Number.isFinite(selected) && selected > 0 && selected < minimum
-      ? `Менее ${minimum} пог. м: проверьте общий метраж заявки.` : "");
+      ? `Минимальный заказ кромки — ${minimum} пог. м.` : "");
   }
 
   function geometricEdgeMetersForSize(size, sidesId = form.edgeSidesSelect.value) {
@@ -3837,7 +4024,7 @@
 
   function positionEdgeWidthControl(state) {
     const item = resolveEdgeCatalogItem("attached", { thicknessMm: state.thicknessMm });
-    const widths = (item?.availableWidths || []).filter((width) => edgeWidthFitsProduct(width));
+    const widths = edgeAvailableWidths(item).filter(edgeWidthFitsProduct);
     return item
       ? `<select data-position-edge-width><option value="">Выберите ширину</option>${widths.map((width) => `<option value="${esc(width)}"${Number(state.widthMm) === Number(width) ? " selected" : ""}>${width} мм</option>`).join("")}</select>`
       : `<input data-position-edge-width type="number" min="1" value="${esc(state.widthMm || "")}" />`;
@@ -3930,18 +4117,24 @@
     const prices = row?.pricesPerM2 && typeof row.pricesPerM2 === "object" ? row.pricesPerM2 : null;
     const discounts = row?.discountsPercent && typeof row.discountsPercent === "object" ? row.discountsPercent : null;
     const explicitRetail = num(prices?.[clientConditionPriceKey("retail")]);
-    const retailRate = Number.isFinite(explicitRetail) ? explicitRetail : rate;
+    const retailRateCandidate = Number.isFinite(explicitRetail) ? explicitRetail : rate;
+    const retailRate = Number.isFinite(retailRateCandidate) && retailRateCandidate >= 0 ? retailRateCandidate : null;
     let selected = null;
+    let invalidDiscount = false;
 
     if (requestedCondition === "retail") {
       if (Number.isFinite(retailRate)) selected = { id: "retail", name: "Розничная цена", sourceMode: Number.isFinite(explicitRetail) ? "direct_price" : "default_rate", price: retailRate };
-    } else if (Number.isFinite(retailRate) && retailRate > 0) {
+    } else if (Number.isFinite(retailRate) && retailRate >= 0) {
       const directTarget = num(prices?.[requestedKey]);
       const explicitDiscount = num(discounts?.[requestedKey]);
-      if (Number.isFinite(directTarget)) {
+      if (Number.isFinite(explicitDiscount) && (explicitDiscount < 0 || explicitDiscount > 100)) {
+        invalidDiscount = true;
+      } else if (Number.isFinite(directTarget) && directTarget < 0) {
+        invalidDiscount = true;
+      } else if (Number.isFinite(directTarget)) {
         selected = { id: requestedCondition, name: clientConditionUiName(requestedCondition), sourceMode: "direct_price", price: directTarget };
       } else if (Number.isFinite(explicitDiscount)) {
-        selected = { id: requestedCondition, name: clientConditionUiName(requestedCondition), sourceMode: "discount_percent", price: retailRate * (1 - Math.max(explicitDiscount, 0) / 100) };
+        selected = { id: requestedCondition, name: clientConditionUiName(requestedCondition), sourceMode: "discount_percent", price: retailRate * (1 - explicitDiscount / 100) };
       }
     }
 
@@ -3961,6 +4154,7 @@
       sourceMode: selected?.sourceMode || null,
       conditionFound: requestedCondition === "retail" ? true : Boolean(selected),
       conditionUnresolved,
+      invalidDiscount,
       retailRatePerM2: Number.isFinite(retailRate) ? retailRate : null,
       automaticRatePerM2: Number.isFinite(finalRate) ? finalRate : null,
       finalRatePerM2: Number.isFinite(finalRate) ? finalRate : null,
@@ -4026,21 +4220,24 @@
       : edgeState.operationRateClass === "thick" ? 1.5
         : null;
     if (!Number.isFinite(tariffClassThickness)) return null;
-    return Core.edgeRateFor(data, baseId, thicknessRaw, tariffClassThickness, runningM, { machineThresholdExclusive: isDetailedPanelCalculation() });
+    // Станок применяется только при метраже строго свыше порога (для всех сценариев).
+    return Core.edgeRateFor(data, baseId, thicknessRaw, tariffClassThickness, runningM, { machineThresholdExclusive: true });
   }
 
   function standardSheetPrices(standard, condition, warnings = []) {
     const retail = num(standard?.pricesPerSheet?.retail);
-    if (!Number.isFinite(retail)) {
-      return { retailSheet: null, finalSheet: null, partial: true, conditionUnresolved: true, note: "Нет розничной цены в строке прайса." };
+    if (!Number.isFinite(retail) || retail < 0) {
+      return { retailSheet: null, finalSheet: null, partial: true, conditionUnresolved: true, note: "Нет корректной розничной цены в строке прайса." };
     }
 
     const selectedConditionId = condition || "retail";
     const selectedKey = clientConditionPriceKey(selectedConditionId);
     const selectedPrice = selectedConditionId === "retail" ? retail : num(standard?.pricesPerSheet?.[selectedKey]);
-    const unresolved = selectedConditionId !== "retail" && !Number.isFinite(selectedPrice);
+    const unresolved = selectedConditionId !== "retail" && (!Number.isFinite(selectedPrice) || selectedPrice < 0);
     if (unresolved) {
-      warnings.push(`Для условия «${clientConditionUiName(selectedConditionId)}» в строке МДФ ${standard.lengthMm}×${standard.widthMm} нет подтверждённой цены; розничная цена автоматически не подставляется.`);
+      warnings.push(Number.isFinite(selectedPrice) && selectedPrice < 0
+        ? `Для условия «${clientConditionUiName(selectedConditionId)}» в строке МДФ ${standard.lengthMm}×${standard.widthMm} указана отрицательная цена. Проверьте прайс; стоимость не рассчитана.`
+        : `Для условия «${clientConditionUiName(selectedConditionId)}» в строке МДФ ${standard.lengthMm}×${standard.widthMm} нет подтверждённой цены; розничная цена автоматически не подставляется.`);
     }
     const finalSheet = unresolved ? null : selectedPrice;
     const automaticDiscountPercent = retail > 0 && Number.isFinite(finalSheet)
@@ -4101,9 +4298,86 @@
 
   const veneerPurchase = Core.veneerPurchase;
 
+  // One visible multi-veneer name may represent several physical sheet formats.
+  // In the detailed calculation select by purchased material area (and waste),
+  // not by the price of the individual sheet format.
+  function multiVeneerVariantByConsumption(selected, group, sizeRows, sideLayouts) {
+    if (!isDetailedPanelCalculation() || selected?.type !== "multi" || !group || !sizeRows.length) return selected;
+    const candidates = veneerVariantsAtThickness(group, itemThickness(selected));
+    if (candidates.length < 2) return selected;
+    const rows = sizeRows.map(size => ({ size, classificationId: classifySize(size).id }))
+      .filter(({ classificationId }) => ["standard_request", "nonstandard"].includes(classificationId));
+    if (!rows.length) return selected;
+
+    const layoutGroups = [...new Set(sideLayouts)].map(layoutId => ({
+      layoutId, surfaceCount: sideLayouts.filter(value => value === layoutId).length
+    }));
+    const rules = {
+      // Формат 2500×640: прирубка по 10 мм с обеих сторон (Назаров, 23.10).
+      "2500x640": { usableLengthMm: 2500, usableWidthMm: 620 },
+      ...(data?.meta?.multiVeneerUsableWidthBySheetFormatMm || {})
+    };
+
+    const ranked = candidates.map(item => {
+      const sheet = Core.veneerPhysicalSheetDimensions(item);
+      if (!sheet) return null;
+      let paidAreaM2 = 0;
+      let purchasedSheets = 0;
+
+      for (const { layoutId, surfaceCount } of layoutGroups) {
+        let nonstandardAreaM2 = 0;
+        for (const { size, classificationId } of rows) {
+          if (classificationId === "standard_request") {
+            const req = Core.standardizedSheetVeneerRequirement(item, {
+              panelLengthMm: size.length, panelWidthMm: size.width,
+              quantity: size.quantity, surfaceCount,
+              roundMultiSheetsPerPanel: true,
+              multiUsableWidthBySheetFormatMm: rules
+            });
+            if (!req.exact) return null;
+            paidAreaM2 += req.paidAreaM2;
+            purchasedSheets += req.purchasedSheets;
+          } else {
+            // Retain the existing nonstandard waste norm and whole-sheet rounding.
+            // Do not infer a new cutting or nesting pattern.
+            if ((size.calcLength || size.length) > sheet.lengthMm) return null;
+            const area = size.calcArea || size.area;
+            const recommended = veneerWasteAdjustmentState({
+              size, classificationId, layoutId, baseAreaPerSideM2: area
+            }).recommendedVeneerAreaM2;
+            if (!Number.isFinite(recommended)) return null;
+            nonstandardAreaM2 += recommended * surfaceCount;
+          }
+        }
+        if (nonstandardAreaM2 > 0) {
+          const sheets = Math.ceil(nonstandardAreaM2 / sheet.areaM2 - 1e-9);
+          paidAreaM2 += sheets * sheet.areaM2;
+          purchasedSheets += sheets;
+        }
+      }
+      return { item, paidAreaM2, purchasedSheets };
+    }).filter(Boolean);
+
+    if (!ranked.length) return selected;
+    ranked.sort((a, b) =>
+      a.paidAreaM2 - b.paidAreaM2 ||
+      a.purchasedSheets - b.purchasedSheets ||
+      String(a.item.id).localeCompare(String(b.item.id), "ru"));
+    return ranked[0].item;
+  }
+
   function calculate() {
     if (!data) return null;
-    if (isDetailedPanelCalculation()) priceAdjustmentOverrides.clear();
+    if (isDetailedPanelCalculation()) {
+      [...priceAdjustmentOverrides.keys()].forEach(key => {
+        // Расход шпона, скорректированный менеджером, должен переживать recalc().
+        // Остальные неподтверждённые корректировки сохраняют прежний порядок сброса.
+        const id = String(key);
+        if (!id.startsWith("mixmatch-material:") && !id.startsWith("veneer-actual:")) {
+          priceAdjustmentOverrides.delete(key);
+        }
+      });
+    }
     capturePositionFinishStateFromDom();
     const warnings = [], breakdown = [], sizes = readSizeRows();
     sizes.forEach((size) => {
@@ -4120,15 +4394,19 @@
     const minimumSizeInvalidRows = sizes.filter(size => size.minimumSizeValid === false);
     const physicalSizeInvalidRows = sizes.filter((size) => size.physicalSizeValid === false);
     const technologicalSizeInvalidRows = sizes.filter((size) => size.physicalSizeValid !== false && size.technologicalSizeValid === false);
+    const unavailableStandardRows = sizes.filter((size) => size.standardSizeAvailable === false);
     const sizeValidation = {
-      valid: minimumSizeInvalidRows.length === 0 && incompleteSizeRows.length === 0 && quantityInvalidRows.length === 0 && transitionQuantityInvalidRows.length === 0 && transitionDescriptionInvalidRows.length === 0 && physicalSizeInvalidRows.length === 0 && technologicalSizeInvalidRows.length === 0,
+      valid: minimumSizeInvalidRows.length === 0 && unavailableStandardRows.length === 0 && incompleteSizeRows.length === 0 && quantityInvalidRows.length === 0 && transitionQuantityInvalidRows.length === 0 && transitionDescriptionInvalidRows.length === 0 && physicalSizeInvalidRows.length === 0 && technologicalSizeInvalidRows.length === 0,
       incompleteSizePositions: incompleteSizeRows.map((size) => size.position),
       quantityInvalidPositions: quantityInvalidRows.map((size) => size.position),
       transitionQuantityInvalidPositions: transitionQuantityInvalidRows.map((size) => size.position),
       transitionDescriptionInvalidPositions: transitionDescriptionInvalidRows.map((size) => size.position),
       physicalSizeInvalidPositions: physicalSizeInvalidRows.map((size) => size.position),
       technologicalSizeInvalidPositions: technologicalSizeInvalidRows.map((size) => size.position),
-      error: minimumSizeInvalidRows.length ? "Минимальный размер готовой детали — 50 мм по каждой стороне." : incompleteSizeRows.length
+      unavailableStandardPositions: unavailableStandardRows.map((size) => size.position),
+      error: minimumSizeInvalidRows.length ? "Минимальный размер готовой детали — 50 мм по каждой стороне." : unavailableStandardRows.length
+        ? `Позиции ${unavailableStandardRows.map((size) => size.position).join(", ")}: выбранный стандартный формат больше не доступен для текущей основы и толщины. Выберите другой формат или укажите свой размер.`
+        : incompleteSizeRows.length
         ? `Заполните длину, ширину и количество в позициях ${incompleteSizeRows.map((size) => size.position).join(", ")} или удалите эти позиции.`
         : quantityInvalidRows.length
         ? "Введите количество целым числом от 1."
@@ -4147,6 +4425,7 @@
                 })()
               : ""
     };
+    if (unavailableStandardRows.length) warnings.push(`Позиции ${unavailableStandardRows.map((size) => size.position).join(", ")}: выбранный стандартный формат больше не доступен. Тип изделия и введённые размеры сохранены; выберите другой стандартный формат или укажите свой размер.`);
     if (incompleteSizeRows.length) warnings.push(sizeValidation.error);
     if (quantityInvalidRows.length) warnings.push("Введите количество целым числом от 1.");
     if (transitionQuantityInvalidRows.length) warnings.push(transitionQuantityMessage());
@@ -4155,8 +4434,18 @@
       const limit = size.technologicalSizeLimit;
       warnings.push(`Позиция ${size.position}: ${isDetailedPanelCalculation() ? (manufacturingTypeForSize(size) === "exact" ? "чистовая деталь" : "полуфабрикат") : "нестандартная готовая деталь со шлифовкой, лаком и кромкой"} при толщине ${String(parseThicknessComposition(currentBaseThicknessRaw()).total).replace(".", ",")} мм — ${technologicalLimitDescription(limit)}.`);
     });
-    if (isDetailedPanelCalculation() && form.edgeModeSelect.value === "separate") warnings.push("Минимальный объём изготовления заказной кромки требует согласования.");
     const validSizes = sizes.filter((x) => x.sizeValid && x.length > 0 && x.width > 0 && x.quantityValid);
+    if (isDetailedPanelCalculation() && validSizes.length) {
+      const sideCount = Number(form.veneeredSidesSelect.value);
+      const aLayouts = [effectiveLayoutId()];
+      if (sideCount === 2 && form.veneerBModeSelect.value === "same" && !backsideCategoryBRequired(selectedVeneerA)) {
+        aLayouts.push(effectiveLayoutBId());
+      }
+      selectedVeneerA = multiVeneerVariantByConsumption(selectedVeneerA, selectedVeneerAGroup, validSizes, aLayouts);
+      if (sideCount === 2 && form.veneerBModeSelect.value === "other") {
+        selectedVeneerB = multiVeneerVariantByConsumption(selectedVeneerB, selectedVeneerBGroup, validSizes, [effectiveLayoutBId()]);
+      }
+    }
     const layoutSelectionRequired = needsLayoutSelection();
     const rawLayout = layoutSelectionRequired ? form.layoutSelect.value : "";
     const layoutAllowed = !layoutSelectionRequired || !rawLayout || isLayoutAllowedForType(rawLayout);
@@ -4268,10 +4557,10 @@
     const faceVeneerBItem = !faceVeneerOnBackRequested
       ? null
       : sameFaceSelectionOnBack
-        ? (isFaceOnlyExtraVeneer(selectedVeneerA) ? backsideBVariantFor(selectedVeneerA) : selectedVeneerA)
+        ? (backsideCategoryBRequired(selectedVeneerA) ? backsideBVariantFor(selectedVeneerA) : selectedVeneerA)
         : selectedVeneerB;
 
-    if (sameFaceSelectionOnBack && isFaceOnlyExtraVeneer(selectedVeneerA) && !faceVeneerBItem &&
+    if (sameFaceSelectionOnBack && backsideCategoryBRequired(selectedVeneerA) && !faceVeneerBItem &&
         validSizes.some((size) => classifySize(size).id !== "warehouse_standard")) {
       hasPartialPrice = true;
       warnings.push("Сторона Б: цена категории B выбранной породы и толщины не найдена. Расчёт неполный; требуется подтверждение материала и цены оборота.");
@@ -4320,7 +4609,7 @@
           standard, size, quantity: size.quantity, mdfVolumeId, condition,
           discountKey, ...p
         });
-        breakdown.push({ label: `Складской стандарт ${size.length}×${size.width}`, value: finalCost, note: p.conditionUnresolved ? `Цена условия «${clientConditionUiName(condition)}» отсутствует — розничная цена не подставлена.` : `${money(p.finalSheet)}/лист × ${size.quantity}. Цена за м² рассчитывается из цены за лист.` });
+        breakdown.push({ label: `Складской стандарт ${size.length}×${size.width}`, value: finalCost, note: p.conditionUnresolved ? `Цена условия «${clientConditionUiName(condition)}» отсутствует — розничная цена не подставлена.` : `${money(p.finalSheet)}/лист × ${size.quantity}. Сумма рассчитывается по цене за лист.` });
         addPositionCost(size, finalCost);
         itemResults.push({ ...size, standard: true, classificationId: classification.id, classificationName: classification.name, standardItem: standard, retailCost, finalCost, veneerRequiredA: 0, veneerRequiredB: 0, veneerWastePercent: null, weight, transitionCoefficient: null, transitionCoefficientApplied: null });
         return;
@@ -4354,7 +4643,9 @@
           if (basePricing.conditionUnresolved) {
             baseWork = 0;
             (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
-            warnings.push(`Стандарт по запросу: для компонента «${basePricing.componentLabel}» нет подтверждённой цены условия «${basePricing.conditionName}»; розничная ставка автоматически не подставляется.`);
+            warnings.push(basePricing.invalidDiscount
+              ? `Стандарт по запросу: для «${basePricing.componentLabel}» в прайсе некорректная скидка (допустимо 0–100%). Стоимость не рассчитана.`
+              : `Стандарт по запросу: для компонента «${basePricing.componentLabel}» нет подтверждённой цены условия «${basePricing.conditionName}»; розничная ставка автоматически не подставляется.`);
             breakdown.push({
               label: `Стандарт по запросу · ${size.length}×${size.width}`,
               value: 0,
@@ -4541,7 +4832,9 @@
             baseWork = basePricing.conditionUnresolved ? 0 : area * appliedRate;
             if (basePricing.conditionUnresolved) {
               (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
-              warnings.push(`Точный размер: для компонента «${basePricing.componentLabel}» нет подтверждённой цены условия «${basePricing.conditionName}»; розничная ставка автоматически не подставляется.`);
+              warnings.push(basePricing.invalidDiscount
+                ? `Точный размер: для «${basePricing.componentLabel}» в прайсе некорректная скидка (допустимо 0–100%). Стоимость не рассчитана.`
+                : `Точный размер: для компонента «${basePricing.componentLabel}» нет подтверждённой цены условия «${basePricing.conditionName}»; розничная ставка автоматически не подставляется.`);
               breakdown.push({ label: `${base.name} + работа, ${size.length}×${size.width}`, value: 0, note: `Цена условия «${basePricing.conditionName}» для компонента не подтверждена — компонент не включён в итог.` });
             } else {
               breakdown.push({ label: `${base.name} + работа, ${size.length}×${size.width}`, value: baseWork, note: `${rateRow.sourceNote || "Готовая ставка из актуальной таблицы деталировки"}: ${money(appliedRate)}/м².${basePricing.conditionFound && condition !== "retail" ? ` ${basePricing.conditionName} применено по прайсовым данным.` : ""} Коэффициент 1,53 повторно не применяется.` });
@@ -4618,7 +4911,7 @@
           roughBackCostTotal += rough;
           roughBackPricingStatus = "calculated";
           retailCost += rough; finalCost += rough;
-          breakdown.push({ label: "Черновой шпон стороны Б", value: rough, note: `${money(roughRate)}/м² для подтверждённой толщины чернового шпона ${String(roughThickness).replace(".", ",")} мм.` });
+          breakdown.push({ label: "Черновой шпон стороны Б", value: rough, note: `${money(roughRate)}/м² для чернового шпона ${String(roughThickness).replace(".", ",")} мм.` });
         } else {
           roughBackPricingStatus = "requires_clarification";
           (hasPartialPrice = true, markPositionPending(size, "Основа и производственные операции"));
@@ -4714,7 +5007,7 @@
       const pricingMode = row.classificationId === "nonstandard" ? "nonstandard" : "standard";
       const aEligible = row.veneerNetA > 0 && !row.readyShirtA && !(row.classificationId === "standard_request" && row.veneerSheetBasedA);
       const bEligible = row.veneerNetB > 0 && !row.readyShirtB && !(row.classificationId === "standard_request" && row.veneerSheetBasedB);
-      const canCombine = layout === layoutB && aEligible && bEligible && sameFaceSelectionOnBack && !isFaceOnlyExtraVeneer(selectedVeneerA) && sameMaterial(selectedVeneerA, faceVeneerBItem);
+      const canCombine = layout === layoutB && aEligible && bEligible && sameFaceSelectionOnBack && !backsideCategoryBRequired(selectedVeneerA) && sameMaterial(selectedVeneerA, faceVeneerBItem);
 
       if (canCombine) {
         addConsumptionContribution({ item: selectedVeneerA, which: "A", sameAsA: true, pricingMode, row, cleanArea: row.veneerNetA, recommendedArea: row.veneerRecommendedA });
@@ -4759,9 +5052,15 @@
         group.contributions.forEach(contribution => { contribution.recommendedArea = recommendedVeneerAreaM2 * contribution.cleanArea / requiredVeneerAreaM2; contribution.row.veneerRecommendedB = contribution.recommendedArea; });
       }
       const fixedMixMatch = fixedMixMatchGroups.includes(group);
+      let mixMatchDetail = null;
       if (fixedMixMatch) {
         const materialArea = mixMatchMaterialAreas.get(materialIdentity(group.item));
-        recommendedVeneerAreaM2 = Math.max(50, materialArea) * requiredVeneerAreaM2 / materialArea;
+        const automaticArea = Math.max(num(data?.meta?.mixMatchDefaultVeneerAreaM2) || 50, materialArea);
+        const overrideId = `mixmatch-material:${materialIdentity(group.item)}`;
+        const changedManually = priceAdjustmentOverrides.has(overrideId);
+        const actualArea = changedManually ? num(priceAdjustmentOverrides.get(overrideId)) : automaticArea;
+        mixMatchDetail = { materialArea, automaticArea, overrideId, changedManually, actualArea };
+        recommendedVeneerAreaM2 = automaticArea * requiredVeneerAreaM2 / materialArea;
         group.contributions.forEach(entry => {
           entry.recommendedArea = recommendedVeneerAreaM2 * entry.cleanArea / requiredVeneerAreaM2;
           entry.row[entry.side === "B" ? "veneerRecommendedB" : "veneerRecommendedA"] = entry.recommendedArea;
@@ -4771,9 +5070,11 @@
         ? (recommendedVeneerAreaM2 / requiredVeneerAreaM2 - 1) * 100
         : null;
       const id = `veneer-actual:${group.key}`;
-      const actualVeneerAreaManual = !isDetailedPanelCalculation() && !fixedMixMatch && priceAdjustmentOverrides.has(id);
+      const actualVeneerAreaManual = fixedMixMatch ? mixMatchDetail.changedManually : priceAdjustmentOverrides.has(id);
       const storedActual = num(priceAdjustmentOverrides.get(id));
-      const actualVeneerAreaM2 = actualVeneerAreaManual ? storedActual : recommendedVeneerAreaM2;
+      const actualVeneerAreaM2 = fixedMixMatch
+        ? (Number.isFinite(mixMatchDetail.actualArea) ? mixMatchDetail.actualArea * requiredVeneerAreaM2 / mixMatchDetail.materialArea : null)
+        : actualVeneerAreaManual ? storedActual : recommendedVeneerAreaM2;
       const complexLayoutMinimumApplies = ["diagonal45", "herringbone"].includes(group.which === "B" ? layoutB : layout) && Number.isFinite(recommendedVeneerAreaM2);
       const minimumActualVeneerAreaM2 = complexLayoutMinimumApplies ? recommendedVeneerAreaM2 : requiredVeneerAreaM2;
       const actualValid = Number.isFinite(actualVeneerAreaM2) && actualVeneerAreaM2 > 0 && actualVeneerAreaM2 + 1e-9 >= minimumActualVeneerAreaM2;
@@ -4807,13 +5108,16 @@
         which: group.which, sideKey: group.sideKey, sameAsA: group.sameAsA, pricingMode: group.pricingMode,
         requiredVeneerAreaM2, recommendedVeneerAreaM2, recommendedWastePercent,
         actualVeneerAreaM2, actualWasteAreaM2, actualWastePercent, actualVeneerAreaManual,
-        valid: actualValid, validationError, mixMatchControlled: fixedMixMatch, mixMatchMaterialAreaM2: fixedMixMatch ? Math.max(50, mixMatchMaterialAreas.get(materialIdentity(group.item))) : null, paidVeneerAreaM2: null, purchasedWholeSheets: null, materialCost: null
+        valid: actualValid, validationError, minimumActualVeneerAreaM2, mixMatchControlled: fixedMixMatch, mixMatchMaterialAreaM2: fixedMixMatch ? mixMatchDetail.actualArea : null,
+        mixMatchAutomaticAreaM2: fixedMixMatch ? mixMatchDetail.automaticArea : null,
+        mixMatchRequiredAreaM2: fixedMixMatch ? mixMatchDetail.materialArea : null,
+        mixMatchOverrideId: fixedMixMatch ? mixMatchDetail.overrideId : null, paidVeneerAreaM2: null, purchasedWholeSheets: null, materialCost: null
       };
       veneerConsumptions.push(consumption);
       veneerWasteAdjustments.push(consumption);
     });
 
-    if (fixedMixMatchGroups.length) warnings.push("MixMatch: минимальная закупка — 50 м² на каждый материал (ориентир для трёх пачек). Одинаковый шпон на сторонах А и Б объединяется.");
+    if (fixedMixMatchGroups.length) warnings.push("MixMatch: для трёх пачек предварительно заложено 50 м² на материал; менеджер может скорректировать по фактической площади. Одинаковый материал объединяется.");
     veneerRequiredStandardA = itemResults.filter((row) => row.classificationId === "standard_request").reduce((sum, row) => sum + (row.veneerRequiredA || 0), 0);
     veneerRequiredStandardB = itemResults.filter((row) => row.classificationId === "standard_request").reduce((sum, row) => sum + (row.veneerRequiredB || 0), 0);
     veneerRequiredNonstandardA = itemResults.filter((row) => row.classificationId === "nonstandard").reduce((sum, row) => sum + (row.veneerRequiredA || 0), 0);
@@ -4821,7 +5125,7 @@
 
     const sameFaceVeneerOnB = (
       sides === 2 && form.veneerBModeSelect.value === "same" && layout === layoutB
-    ) && !isFaceOnlyExtraVeneer(selectedVeneerA);
+    ) && !backsideCategoryBRequired(selectedVeneerA);
     const mixMatchRelevantConsumptions = veneerConsumptions.filter((consumption) => (
       sameMaterial(consumption.item, selectedVeneerA) && ["A", "A+B"].includes(consumption.sideKey)
     ));
@@ -5013,7 +5317,7 @@
       if (!(requiredA > 0 || requiredB > 0)) return;
       const sameVeneerOnB = requiredB > 0 && sides === 2 && form.veneerBModeSelect.value === "same";
 
-      if (sameVeneerOnB && isFaceOnlyExtraVeneer(selectedVeneerA)) {
+      if (sameVeneerOnB && backsideCategoryBRequired(selectedVeneerA)) {
         addVeneerComponent(selectedVeneerA, requiredA, "A", `Шпон стороны А${contextLabel}`, false, pricingMode);
         const backB = backsideBVariantFor(selectedVeneerA);
         if (backB) addVeneerComponent(backB, requiredB, "B", `Шпон стороны Б (категория B)${contextLabel}`, false, pricingMode);
@@ -5051,7 +5355,7 @@
         layout === layoutB && item.veneerSheetBasedA &&
         item.veneerSheetBasedB &&
         sameFaceSelectionOnBack &&
-        !isFaceOnlyExtraVeneer(selectedVeneerA) &&
+        !backsideCategoryBRequired(selectedVeneerA) &&
         selectedVeneerA && faceVeneerBItem &&
         (selectedVeneerA.id ? selectedVeneerA.id === faceVeneerBItem.id : veneerDisplayName(selectedVeneerA) === veneerDisplayName(faceVeneerBItem))
       );
@@ -5073,7 +5377,7 @@
       if (item.veneerSheetBasedB && faceVeneerBItem) {
         addStandardSheetGroupRow({
           item: faceVeneerBItem, which: "B", surfaceCount: 1,
-          label: isFaceOnlyExtraVeneer(selectedVeneerA)
+          label: backsideCategoryBRequired(selectedVeneerA)
             ? "Шпон стороны Б (категория B) · стандарт по запросу"
             : "Шпон стороны Б · стандарт по запросу",
           row: item
@@ -5108,14 +5412,21 @@
       const sideKey = group.sameAsA ? "A+B" : group.which;
       const consumptionKey = `standard-sheet:${materialIdentity(group.item)}:${sideKey}:${group.length}x${group.width}`;
       const id = `veneer-actual:${consumptionKey}`;
-      const actualVeneerAreaManual = !isDetailedPanelCalculation() && priceAdjustmentOverrides.has(id);
+      const actualVeneerAreaManual = priceAdjustmentOverrides.has(id);
       const storedActual = num(priceAdjustmentOverrides.get(id));
       const actualVeneerAreaM2 = actualVeneerAreaManual ? storedActual : recommendedVeneerAreaM2;
-      const valid = Number.isFinite(actualVeneerAreaM2) && actualVeneerAreaM2 > 0 && actualVeneerAreaM2 + 1e-9 >= requiredVeneerAreaM2;
+      // Для стандартизированного мультишпона полезный расход не может быть ниже
+      // технологической потребности; закупка всё равно кратна целым листам.
+      const minimumActualVeneerAreaM2 = fixedMultiPurchase && Number.isFinite(technicalSheets) && Number.isFinite(physicalSheetAreaM2)
+        ? Math.max(requiredVeneerAreaM2, technicalSheets * physicalSheetAreaM2)
+        : requiredVeneerAreaM2;
+      const valid = Number.isFinite(actualVeneerAreaM2) && actualVeneerAreaM2 > 0 && actualVeneerAreaM2 + 1e-9 >= minimumActualVeneerAreaM2;
       const validationError = !Number.isFinite(actualVeneerAreaM2)
         ? "Укажите фактическое количество шпона."
-        : actualVeneerAreaM2 <= 0 || actualVeneerAreaM2 + 1e-9 < requiredVeneerAreaM2
-          ? "Фактическое количество шпона не может быть меньше расчётной потребности"
+        : actualVeneerAreaM2 <= 0 || actualVeneerAreaM2 + 1e-9 < minimumActualVeneerAreaM2
+          ? (fixedMultiPurchase
+              ? `Для мультишпона технологически необходимо не менее ${round(minimumActualVeneerAreaM2, 3)} м² шпона.`
+              : "Фактическое количество шпона не может быть меньше расчётной потребности")
           : "";
       const actualWasteAreaM2 = Number.isFinite(actualVeneerAreaM2) ? actualVeneerAreaM2 - requiredVeneerAreaM2 : null;
       const actualWastePercent = Number.isFinite(actualWasteAreaM2) && requiredVeneerAreaM2 > 0
@@ -5123,7 +5434,10 @@
         : null;
       let requirement = { ...automaticRequirement, selectedActualAreaM2: Number.isFinite(actualVeneerAreaM2) ? actualVeneerAreaM2 : null };
       if (automaticRequirement?.exact && valid && Number.isFinite(physicalSheetAreaM2) && physicalSheetAreaM2 > 0) {
-        const purchasedSheets = Math.ceil(actualVeneerAreaM2 / physicalSheetAreaM2 - 1e-9);
+        const estimatedSheets = Math.ceil(actualVeneerAreaM2 / physicalSheetAreaM2 - 1e-9);
+        const purchasedSheets = fixedMultiPurchase
+          ? Math.max(automaticRequirement.purchasedSheets, estimatedSheets)
+          : estimatedSheets;
         requirement = { ...requirement, purchasedSheets, paidAreaM2: purchasedSheets * physicalSheetAreaM2 };
       }
       const linkedConsumptions = existingSpecificationItems().filter(record =>
@@ -5146,7 +5460,7 @@
         panelSize: { length: group.length, width: group.width },
         requiredVeneerAreaM2, recommendedVeneerAreaM2, recommendedWastePercent,
         actualVeneerAreaM2, actualWasteAreaM2, actualWastePercent, actualVeneerAreaManual,
-        valid, validationError, paidVeneerAreaM2: Number.isFinite(num(requirement.paidAreaM2)) ? num(requirement.paidAreaM2) : null,
+        valid, validationError, minimumActualVeneerAreaM2, paidVeneerAreaM2: Number.isFinite(num(requirement.paidAreaM2)) ? num(requirement.paidAreaM2) : null,
         purchasedWholeSheets: Number.isFinite(num(requirement.purchasedSheets)) ? num(requirement.purchasedSheets) : null, materialCost: null
       };
       if (!valid) {
@@ -5553,12 +5867,12 @@
             }
 
             const productionOperation = manufacturingCostFromProduction(validSizes.find((size) => size.rowId === item.rowId));
-            const groupEdgeMeters = (isDetailedPanelCalculation() ? edge.geometricMeters : attachedEdgeMeters) + existingSpecificationItems().filter(record =>
+            const groupEdgeMeters = edge.geometricMeters + existingSpecificationItems().filter(record =>
               window.WoodstockSpecificationGroupId && (record.calculationGroupId || record.id) === window.WoodstockSpecificationGroupId && record.edge?.mode === "attached"
-            ).reduce((sum, record) => sum + (Number(isDetailedPanelCalculation() ? record.edge.geometricMeters : record.edge.calculatedMeters) || 0), 0);
+            ).reduce((sum, record) => sum + (Number(record.edge.geometricMeters) || 0), 0);
             const rateInfo = productionOperation ? null : attachedEdgeRateFor(thickness.raw, selection, groupEdgeMeters, base?.id);
             if (rateInfo && Number.isFinite(rateInfo.rate)) {
-              const operationMeters = isDetailedPanelCalculation() ? item.geometricMeters : meters;
+              const operationMeters = item.geometricMeters;
               const operationCost = operationMeters * rateInfo.rate;
               operationCostTotal += operationCost;
               operationRates.add(rateInfo.rate);
@@ -5567,7 +5881,7 @@
               breakdown.push({
                 label: `Кромление — операция · позиция ${item.position}`,
                 value: operationCost,
-                note: `${round(operationMeters, 2)} пог. м × ${money(rateInfo.rate)}/пог. м · ${rateInfo.method === "machine" ? `станок (общий метраж ${isDetailedPanelCalculation() ? "свыше" : "от"} ${rateInfo.threshold} пог. м)` : rateInfo.method === "manual" ? `вручную (общий метраж до ${rateInfo.threshold} пог. м${isDetailedPanelCalculation() ? " включительно" : ""})` : "ранее подтверждённый тариф"}.`
+                note: `${round(operationMeters, 2)} пог. м × ${money(rateInfo.rate)}/пог. м · ${rateInfo.method === "machine" ? `станок (общий метраж свыше ${rateInfo.threshold} пог. м)` : rateInfo.method === "manual" ? `вручную (общий метраж до ${rateInfo.threshold} пог. м включительно)` : "ранее подтверждённый тариф"}.`
               });
             } else if (productionOperation || operationPriceComesFromProduction(base)) {
               operationIncomplete = true;
@@ -5594,6 +5908,9 @@
           edge.stockProgram = positionSettings.filter((item) => item.applies).every((item) => item.selection?.stockProgram);
           edge.orderPosition = positionSettings.filter((item) => item.applies).some((item) => item.selection?.orderPosition);
           const appliedSelections = positionSettings.filter((item) => item.applies && item.selection).map((item) => item.selection);
+          const catalogSources = [...new Set(appliedSelections.map(selection=>selection.priceCatalogSource).filter(Boolean))];
+          edge.priceCatalogSource = catalogSources.length===1 ? catalogSources[0] : catalogSources.length ? "Разные прайсы — см. позиции кромки" : null;
+          edge.orderedProgram = appliedSelections.some(selection=>selection.orderedProgram);
           const conditionIds = new Set(appliedSelections.map((selection) => selection.conditionId || "retail"));
           const conditionNames = new Set(appliedSelections.map((selection) => selection.conditionName || "Розничная цена"));
           const conditionSources = new Set(appliedSelections.map((selection) => selection.conditionSource || "retail"));
@@ -5614,6 +5931,9 @@
       const meters = num(form.separateEdgeMetersInput.value);
       const orderEdgeMeters = Number.isFinite(meters) && meters > 0 ? meters : 0;
       const selection = edgeSelectionState("separate", { orderRunningM: orderEdgeMeters });
+      if (isDetailedPanelCalculation() && (selection.orderedProgram || selection.customOrder)) {
+        warnings.push("Минимальный объём изготовления заказной кромки требует согласования.");
+      }
       edge = {
         ...edge,
         ...selection,
@@ -5639,14 +5959,11 @@
         edge.validationError = "Укажите требуемый метраж отдельной кромки.";
         warnings.push(edge.validationError);
         hasPartialPrice = true;
-      } else if (isQuickStandardPanel() && meters < minMeters) {
+      } else if (Number.isFinite(minMeters) && meters < minMeters) {
         edge.valid = false;
-        edge.validationError = "Минимальный заказ кромки 50 пог. м";
+        edge.validationError = `Минимальный заказ кромки — ${minMeters} пог. м.`;
         warnings.push(edge.validationError);
         hasPartialPrice = true;
-      } else if (Number.isFinite(minMeters) && meters < minMeters) {
-        edge.minimumOrderWarning = `Менее ${minMeters} пог. м: минимум пока не подтверждён на уровне одной позиции; проверьте общий метраж заявки.`;
-        warnings.push(edge.minimumOrderWarning);
       }
 
       if (!selection.valid) {
@@ -5731,19 +6048,21 @@
         const nonstandardArea = calibrationSizes.filter((x) => classifySize(x).id === "nonstandard").reduce((sum, x) => sum + (x.calcArea || x.area), 0);
         const operationArea = warehouseArea + requestArea + nonstandardArea;
         calibrationArea = operationArea;
-        calibrationCost = operationArea * calibrationRatePerM2;
+        calibrationCost = operationArea > 0 ? operationArea * calibrationRatePerM2 : calibrationProductionArea > 0 && isDetailedPanelCalculation() ? null : 0;
         calibrationPricingStatus = calibrationProductionArea > 0 ? (operationArea > 0 ? "calculated_and_pending_production" : "pending_production") : "calculated";
-        retailTotal += calibrationCost;
-        finalTotal += calibrationCost;
-        calibrationSizes.forEach((size) => addPositionCost(size, (size.calcArea || size.area) * calibrationRatePerM2));
-        standardFinalSubtotal += warehouseArea * calibrationRatePerM2;
-        standardRequestFinalSubtotal += requestArea * calibrationRatePerM2;
-        nonstandardFinalSubtotal += nonstandardArea * calibrationRatePerM2;
-        breakdown.push({
-          label: "Калибровка основы",
-          value: calibrationCost,
-          note: `${specNumber(calibrationSourceBaseThicknessMm, 2)} → ${specNumber(baseThicknessAfterCalibrationMm, 2)} мм · съём ${specNumber(calibrationDepth, 2)} мм · ${money(calibrationRatePerM2PerMm)}/м² за 1 мм · итоговая ставка ${money(calibrationRatePerM2)}/м².`
-        });
+        if (operationArea > 0) {
+          retailTotal += calibrationCost;
+          finalTotal += calibrationCost;
+          calibrationSizes.forEach((size) => addPositionCost(size, (size.calcArea || size.area) * calibrationRatePerM2));
+          standardFinalSubtotal += warehouseArea * calibrationRatePerM2;
+          standardRequestFinalSubtotal += requestArea * calibrationRatePerM2;
+          nonstandardFinalSubtotal += nonstandardArea * calibrationRatePerM2;
+          breakdown.push({
+            label: "Калибровка основы",
+            value: calibrationCost,
+            note: `${specNumber(calibrationSourceBaseThicknessMm, 2)} → ${specNumber(baseThicknessAfterCalibrationMm, 2)} мм · съём ${specNumber(calibrationDepth, 2)} мм · ${money(calibrationRatePerM2PerMm)}/м² за 1 мм · итоговая ставка ${money(calibrationRatePerM2)}/м².`
+          });
+        }
       }
     }
 
@@ -5936,7 +6255,7 @@
       breakdown.push({ label: "Изолятор", value: isolatorCost, note: `${money(data.meta.isolatorRatePerM2)}/м² по фактически обрабатываемым сторонам.` });
     }
 
-    const automaticFinalTotal = finalTotal;
+    let automaticFinalTotal = finalTotal;
     const manualDiscountPercent = 0;
     let manualDiscountCandidateTotal = null;
     let manualDiscountApplied = false;
@@ -5995,7 +6314,7 @@
     const selectedRoughThickness = roughSideRequested ? selectedRoughBackThickness() : null;
     const sideThicknessCompatible = !otherSideRequested || sameConfirmedThickness(veneerThickness, sideBThickness);
     const roughSideCompatible = !roughSideRequested || (isExactlyOnePointFive(veneerThickness) && Number.isFinite(selectedRoughThickness) && selectedRoughThickness <= 1.5 + 0.001);
-    if (requiresTwoFaceSides(veneerThickness) && sides !== 2) warnings.push(document.body.classList.contains("quick-panels-page") ? twoSidedVeneerRequirementMessage() : "Шпон толщиной 1,5 мм и более требует двусторонней оклейки.");
+    if (requiresTwoFaceSides(veneerThickness) && sides !== 2) warnings.push(document.body.classList.contains("quick-panels-page") ? twoSidedVeneerRequirementMessage() : "Шпон толщиной 2 мм и более требует двусторонней оклейки.");
     if (otherSideRequested && isReadyShirt(selectedVeneerA || selectedVeneerAGroup) && !Number.isFinite(veneerThickness)) {
       warnings.push("Для выбора другого материала необходимо указать подтверждённую толщину готовой рубашки");
     } else if (otherSideRequested && otherSideMaterialForCompatibility && !sideThicknessCompatible) {
@@ -6035,14 +6354,6 @@
         warnings.push(`Позиция ${item.position}: ${message}. Размеры сохранены для проверки; наличие цены производства само по себе не подтверждает формат.`);
       });
     }
-    const pendingQuickRules = [];
-    if (isQuickWallPanel() && Math.abs(veneerThickness - 2) < 0.001) pendingQuickRules.push("Лицевой слой 2 мм: материал и цена оборота не согласованы; показанная стоимость предварительная.");
-    if ((isQuickWallPanel() || isQuickStandardPanel()) && form.edgeModeSelect.value !== "none" && sides === 1 && form.reverseSideSelect.value === "paper") pendingQuickRules.push("Толщина бумаги не подтверждена: ширина и стоимость кромки предварительные, требуется согласование производства.");
-    if (pendingQuickRules.length) {
-      hasPartialPrice = true;
-      requiresProductionCost = true;
-      pendingQuickRules.forEach(message => { warnings.push(message); itemResults.forEach(item => markPositionPending(item, message)); });
-    }
     let priceCalculationComplete = Boolean(
       base &&
       Number.isFinite(thickness.total) &&
@@ -6061,8 +6372,12 @@
       itemResults.forEach(item => {
         if (manufacturingCostFromProduction(item)) markPositionPending(item, "Стоимость производства");
         if (thickVeneerWorkAdjustment.applies && isExactFinishedDetail(item) && !Number.isFinite(thickVeneerWorkAdjustment.actualCoefficient)) markPositionPending(item, "Работа с толстым шпоном");
-        if (sameFaceSelectionOnBack && isFaceOnlyExtraVeneer(selectedVeneerA) && !faceVeneerBItem && item.classificationId !== "warehouse_standard") markPositionPending(item, "Шпон оборотной стороны");
-        if (calibrationEnabled && !["calculated", "included_in_panel_price", "not_required"].includes(calibrationPricingStatus)) markPositionPending(item, "Калибровка: стоимость уточняет производство");
+        if (sameFaceSelectionOnBack && backsideCategoryBRequired(selectedVeneerA) && !faceVeneerBItem && item.classificationId !== "warehouse_standard") markPositionPending(item, "Шпон оборотной стороны");
+        if (calibrationEnabled &&
+            !["calculated", "included_in_panel_price", "not_required"].includes(calibrationPricingStatus) &&
+            (calibrationPricingStatus !== "calculated_and_pending_production" || manufacturingCostFromProduction(item))) {
+          markPositionPending(item, "Калибровка: стоимость уточняет производство");
+        }
         const finish = finishResults.find(entry => entry.rowId === item.rowId);
         if (finish && (finish.totalFinishCost === null || finish.requiresProductionCost || [finish.toningPricingStatus,finish.isolatorPricingStatus].some(status => /pending|incomplete/.test(status || "")))) markPositionPending(item, "Финишное покрытие");
       });
@@ -6119,6 +6434,19 @@
         hasPartialPrice=!priceCalculationComplete;
       }
     }
+    // An invoice line is the calculated position (or a separate order-level charge).
+    // Round those monetary lines once, then derive the order total from their cents.
+    // Never force reconciliation if the original ledger is already inconsistent.
+    const rawPositionTotalSum = itemResults.reduce((sum, item) => sum + (positionCostByRowId.get(item.rowId) || 0), 0);
+    const rawLedgerReconciled = Math.abs(rawPositionTotalSum + orderLevelUnallocatedCost - finalTotal) <= 0.005;
+    if (isDetailedPanelCalculation() && rawLedgerReconciled) {
+      for (const [rowId, cost] of positionCostByRowId) positionCostByRowId.set(rowId, roundMoney(cost));
+      orderLevelUnallocatedCost = roundMoney(orderLevelUnallocatedCost);
+      const positionCents = itemResults.reduce((sum, item) => sum + moneyCents(positionCostByRowId.get(item.rowId) || 0), 0);
+      finalTotal = (positionCents + moneyCents(orderLevelUnallocatedCost)) / 100;
+      automaticFinalTotal = finalTotal;
+      retailTotal = roundMoney(retailTotal);
+    }
     const positionTotalSum = itemResults.reduce((sum, item) => sum + (positionCostByRowId.get(item.rowId) || 0), 0);
     const knownPositionPricingReconciled = Math.abs(positionTotalSum + orderLevelUnallocatedCost - finalTotal) <= 0.005;
     const positionPricingReconciled = window.WoodstockPanelsView?.positionPricing
@@ -6153,7 +6481,7 @@
         : null;
     });
 
-    const vat = finalTotal > 0 ? finalTotal * data.meta.vatRate / (1 + data.meta.vatRate) : 0;
+    const vat = finalTotal > 0 ? roundMoney(finalTotal * data.meta.vatRate / (1 + data.meta.vatRate)) : 0;
     const sandingRatePerM2 = sides === 2 ? data.meta.sandingRatesPerM2.twoSides : data.meta.sandingRatesPerM2.oneSide;
     const sandingPricingStatus = sandingProductionArea > 0 ? (sandingCalculatedArea > 0 ? "calculated_and_pending_production" : "pending_production") : sandingCalculatedArea > 0
       ? (sandingIncludedArea > 0 ? "calculated_and_included" : "calculated")
@@ -6220,9 +6548,17 @@
       ratePerM2: Number.isFinite(roughBackRatePerM2) ? roughBackRatePerM2 : null,
       materialCost: roughBackPricingStatus === "calculated" ? roughBackCostTotal : null,
       pricingStatus: roughBackPricingStatus === "not_required" ? "requires_clarification" : roughBackPricingStatus,
-      source: "meta.roughBackVeneerRatesPerM2ByThickness"
+      source: roughBackOneMmTemporaryRateApplies() ? "temporary_team_rate_1mm_as_1_5mm_440_rub_m2" : "meta.roughBackVeneerRatesPerM2ByThickness"
     } : null;
-    return { base, thickness, sizes, validSizes, itemResults, productionCosts, totalArea, totalProductionArea, totalPieces, retailTotal, retailAvgM2: totalArea > 0 ? retailTotal / totalArea : null, automaticFinalTotal, finalTotal, manualDiscountPercent, manualDiscountCandidateTotal, manualDiscountApplied, vat, avgM2: totalArea > 0 ? finalTotal / totalArea : null, avgPiece: totalPieces > 0 ? finalTotal / totalPieces : null, totalWeight, warnings: [...new Set(warnings)], breakdown, hasPartialPrice, priceCalculationComplete, allStandard, attachedEdgeMeters, edge, edgeComment, orderLevelUnallocatedCost, positionPricingReconciled, mdfVolumeId, herringbone, customLayout, veneerPricings, readyShirtPricings, mdfPricings, baseRatePricings, veneerWasteAdjustments, veneerConsumptions, standardFinalSubtotal, standardRequestFinalSubtotal, nonstandardFinalSubtotal, roughBackVeneer, techOperations, finishResults, requiresBaseProductionCost, requiresLayoutProductionCost, requiresAllowanceProductionCost, requiresReadyShirtProductionCost, requiresFinishProductionCost, requiresOperationProductionCost, requiresProductionCost, thickVeneerWorkAdjustment, mixMatchVeneerPricing, layoutValidation, sizeValidation };
+    let retailAvgM2 = totalArea > 0 ? retailTotal / totalArea : null;
+    if (isDetailedPanelCalculation() && totalArea > 0 && mdfPricings.length === validSizes.length
+        && mdfPricings.every(({ standard }) => Number.isFinite(standard.pricesPerM2?.retail))) {
+      const sheetSubtotal = mdfPricings.reduce((sum, row) => sum + row.retailSheet * row.quantity, 0);
+      if (roundMoney(sheetSubtotal) === roundMoney(retailTotal)) {
+        retailAvgM2 = mdfPricings.reduce((sum, row) => sum + row.standard.pricesPerM2.retail * row.size.area, 0) / totalArea;
+      }
+    }
+    return { base, thickness, sizes, validSizes, itemResults, productionCosts, totalArea, totalProductionArea, totalPieces, retailTotal, retailAvgM2, automaticFinalTotal, finalTotal, manualDiscountPercent, manualDiscountCandidateTotal, manualDiscountApplied, vat, avgM2: totalArea > 0 ? finalTotal / totalArea : null, avgPiece: totalPieces > 0 ? finalTotal / totalPieces : null, totalWeight, warnings: [...new Set(warnings)], breakdown, hasPartialPrice, priceCalculationComplete, allStandard, attachedEdgeMeters, edge, edgeComment, orderLevelUnallocatedCost, positionPricingReconciled, mdfVolumeId, herringbone, customLayout, veneerPricings, readyShirtPricings, mdfPricings, baseRatePricings, veneerWasteAdjustments, veneerConsumptions, standardFinalSubtotal, standardRequestFinalSubtotal, nonstandardFinalSubtotal, roughBackVeneer, techOperations, finishResults, requiresBaseProductionCost, requiresLayoutProductionCost, requiresAllowanceProductionCost, requiresReadyShirtProductionCost, requiresFinishProductionCost, requiresOperationProductionCost, requiresProductionCost, thickVeneerWorkAdjustment, mixMatchVeneerPricing, layoutValidation, sizeValidation };
   }
 
   function specRow(label, value, level = 0) {
@@ -6259,6 +6595,7 @@
 
     if (isGloss100Finish(normalized)) {
       const rows = [specRow(label, "Глянец 100%", level)];
+      rows.push(specRow("Тип лака", finishOption(normalized.finishId)?.name || (isPolyurethaneLacquer(normalized.finishId) ? "Лак полиуретановый" : "Лак акриловый"), childLevel));
       rows.push(specRow("Стороны покрытия", normalized.sides || "—", childLevel));
       if (normalized.toning === "yes") rows.push(specRow("Тонировка", "Да", childLevel));
       if (normalized.isolator === "yes") rows.push(specRow("Изолятор", "Да", childLevel));
@@ -6301,8 +6638,8 @@
     const manufacturingType = manufacturingTypeForSize(size);
     if (!manufacturingType) return "—";
     if (manufacturingType === "standard") return "Стандартная панель";
-    if (manufacturingType === "allowance20") return "Нестандарт с припуском +20 мм";
-    return "Готовая деталь в точный размер";
+    if (manufacturingType === "allowance20") return isDetailedPanelCalculation() ? "Нестандартный полуфабрикат" : "Нестандарт с припуском +20 мм";
+    return isDetailedPanelCalculation() ? "Деталь в чистовой размер" : "Готовая деталь в точный размер";
   }
 
   function priceSourceForSpec(size, item = null) {
@@ -6396,7 +6733,7 @@
       : (form.reverseSideSelect.options[form.reverseSideSelect.selectedIndex]?.text || "—");
     const sideBSelectedMaterial = sides === 2
       ? (sideBSelectionMode === "same"
-        ? (isFaceOnlyExtraVeneer(selectedVeneerA) ? backsideBVariantFor(selectedVeneerA) : veneerA)
+        ? (backsideCategoryBRequired(selectedVeneerA) ? backsideBVariantFor(selectedVeneerA) : veneerA)
         : sideBSelectionMode === "other" ? (selectedVeneerB || selectedVeneerBGroup) : null)
       : null;
     const sideBThickness = sideBSelectionMode === "rough"
@@ -6459,6 +6796,7 @@
       characteristics.push(specRow("Кромка", "Нет"));
     } else {
       characteristics.push(specRow("Кромка", edge.displayName || edge.name || edge.typeName || "Да"));
+      if(edge.priceCatalogSource) characteristics.push(specRow("Источник цены кромки",edge.priceCatalogSource,1));
       if (edge.thicknessApplicable && Number.isFinite(edge.thicknessMm)) characteristics.push(specRow("Толщина кромки", `${specNumber(edge.thicknessMm, 2)} мм`, 1));
       if (Number.isFinite(edge.widthMm)) characteristics.push(specRow("Ширина кромки", `${specNumber(edge.widthMm, 2)} мм`, 1));
       if (edge.mode === "attached") {
@@ -6527,7 +6865,9 @@
         specRow("Длина, мм", Number.isFinite(size.length) && size.length > 0 ? specNumber(size.length, 2) : "—"),
         specRow("Ширина, мм", Number.isFinite(size.width) && size.width > 0 ? specNumber(size.width, 2) : "—"),
         specRow("Количество, шт.", Number.isInteger(size.quantity) && size.quantity > 0 ? String(size.quantity) : "—"),
-        specRow("Тип изготовления", sizeTypeForSpec(size)),
+        specRow(isDetailedPanelCalculation() ? "Тип изделия" : "Тип изготовления", sizeTypeForSpec(size)),
+        ...(isDetailedPanelCalculation() && manufacturingTypeForSize(size) === "allowance20" && Number.isFinite(size.calcLength) && Number.isFinite(size.calcWidth)
+          ? [specRow("Расчётный размер заготовки, мм", `${size.calcLength} × ${size.calcWidth}`)] : []),
         specRow("Источник цены", priceSourceForSpec(size, item)),
         specRow("Площадь, м²", Number.isFinite(size.area) && size.area > 0 ? specNumber(size.area, 3) : "—"),
         specRow("Объём, м³", Number.isFinite(volume) ? specNumber(volume, 4) : "—"),
@@ -6542,20 +6882,30 @@
     const multiplePositions = (result.validSizes || []).length > 1;
     form.specPricePerM2Label.textContent = multiplePositions ? "Средняя цена за м² с НДС" : "Цена за м² с НДС";
     form.specPricePerPieceLabel.textContent = multiplePositions ? "Средняя цена за шт. / лист" : "Цена за шт. / лист";
-    if (result.priceCalculationComplete) {
+    const partialPrice = !result.priceCalculationComplete && isDetailedPanelCalculation()
+      && result.sizeValidation?.valid !== false && (result.validSizes || []).length > 0
+      && Number.isFinite(result.finalTotal) && roundMoney(result.finalTotal) > 0;
+    if (form.specTotalLabel) form.specTotalLabel.textContent = result.priceCalculationComplete ? "Итого с НДС" : "Стоимость рассчитанной части с НДС";
+    if (form.specPartialNote) {
+      const incomplete = !result.priceCalculationComplete && isDetailedPanelCalculation() && (result.validSizes || []).length > 0;
+      form.specPartialNote.classList.toggle("is-hidden", !incomplete);
+      form.specPartialNote.textContent = !incomplete ? "" : result.requiresProductionCost
+        ? "Стоимость производства пока не включена. Окончательную сумму уточним в общей спецификации."
+        : "Расчёт неполный: часть составляющих ещё не оценена. Окончательную сумму уточним в общей спецификации.";
+    }
+    if (result.priceCalculationComplete || partialPrice) {
       form.specPricePerM2.textContent = money(result.avgM2);
       form.specPricePerPiece.textContent = money(result.avgPiece);
       form.specTotal.textContent = money(result.finalTotal);
       form.specVat.textContent = `В том числе НДС 22%: ${money(result.vat)}`;
-    } else if (result.requiresProductionCost && !(isDetailedPanelCalculation() && result.sizeValidation?.valid === false)) {
-      form.specPricePerM2.textContent = "—";
-      form.specPricePerPiece.textContent = "—";
-      form.specTotal.textContent = "Требуется стоимость производства";
-      form.specVat.textContent = "В том числе НДС 22%: —";
+      if (partialPrice) {
+        form.specPricePerM2Label.textContent = multiplePositions ? "Средняя стоимость рассчитанной части за м² с НДС" : "Стоимость рассчитанной части за м² с НДС";
+        form.specPricePerPieceLabel.textContent = multiplePositions ? "Средняя стоимость рассчитанной части за шт. / лист" : "Стоимость рассчитанной части за шт. / лист";
+      }
     } else {
       form.specPricePerM2.textContent = "—";
       form.specPricePerPiece.textContent = "—";
-      form.specTotal.textContent = "—";
+      form.specTotal.textContent = result.requiresProductionCost && (result.validSizes || []).length > 0 ? "Уточняется" : "—";
       form.specVat.textContent = "В том числе НДС 22%: —";
     }
   }
@@ -6667,8 +7017,8 @@
     form.priceAdjustmentsList.append(wrapper);
   }
 
-  function renderAreaAdjustmentControl({ id, name, automaticArea = null, area = null, note = "" }) {
-    if (isDetailedPanelCalculation()) return;
+  function renderAreaAdjustmentControl({ id, name, automaticArea = null, area = null, note = "", detailedAllowed = false, minimumArea = null }) {
+    if (isDetailedPanelCalculation() && !detailedAllowed) return;
     const wrapper = document.createElement("div");
     wrapper.className = "dynamic-adjustment-row";
 
@@ -6688,7 +7038,7 @@
     control.className = "inline-percent-control";
     const input = document.createElement("input");
     input.type = "number";
-    input.min = "0.01";
+    input.min = Number.isFinite(minimumArea) ? String(round(minimumArea, 2)) : "0.01";
     input.step = "0.01";
     input.value = Number.isFinite(area) ? String(round(area, 2)) : "";
     input.setAttribute("aria-label", `${name}, м²`);
@@ -6699,7 +7049,7 @@
 
     input.addEventListener("change", () => {
       const value = Number(input.value);
-      if (!Number.isFinite(value) || value <= 0) {
+      if (!Number.isFinite(value) || value <= 0 || (Number.isFinite(minimumArea) && value + 1e-9 < minimumArea)) {
         input.value = Number.isFinite(area) ? String(round(area, 2)) : "";
         return;
       }
@@ -6736,15 +7086,6 @@
 
   function renderVeneerWasteAdjustmentControl(consumption) {
     if (!consumption) return;
-    if (isDetailedPanelCalculation()) {
-      const summary = document.createElement("p");
-      summary.className = "field__note";
-      const area = Number.isFinite(consumption.actualVeneerAreaM2) ? round(consumption.actualVeneerAreaM2, 3) + " м²" : "не определён по имеющимся данным";
-      const waste = Number.isFinite(consumption.actualWastePercent) ? " · отход " + round(consumption.actualWastePercent, 1) + "%" : "";
-      summary.textContent = (consumption.materialName || "Шпон") + " · сторона " + (consumption.sideKey || consumption.which || "—") + ": расход " + area + waste + ". Рассчитывается автоматически.";
-      form.priceAdjustmentsList.append(summary);
-      return;
-    }
     const wrapper = document.createElement("div");
     wrapper.className = "dynamic-adjustment-row";
 
@@ -6757,10 +7098,11 @@
     label.textContent = `Фактическое количество шпона · ${sideLabel}`;
     const meta = document.createElement("span");
     meta.className = "adjustment-manual";
+    const precision = isDetailedPanelCalculation() ? 3 : 2;
     const recommendedText = Number.isFinite(consumption.recommendedVeneerAreaM2)
-      ? `${round(consumption.recommendedVeneerAreaM2, 2)} м² (${round(consumption.recommendedWastePercent, 1)}%)`
+      ? `${round(consumption.recommendedVeneerAreaM2, precision)} м² (${round(consumption.recommendedWastePercent, 1)}%)`
       : "не определён";
-    meta.textContent = `${consumption.materialName || "Шпон"} · ${contextLabel} · расчётная потребность ${round(consumption.requiredVeneerAreaM2, 2)} м² · рекомендуемый расход ${recommendedText}`;
+    meta.textContent = `${consumption.materialName || "Шпон"} · ${contextLabel} · расчётная потребность ${round(consumption.requiredVeneerAreaM2, precision)} м² · рекомендуемый расход ${recommendedText}`;
     label.append(document.createElement("br"), meta);
 
     const right = document.createElement("div");
@@ -6770,9 +7112,11 @@
     areaControl.className = "inline-percent-control";
     const areaInput = document.createElement("input");
     areaInput.type = "number";
-    areaInput.min = "0.01";
-    areaInput.step = "0.01";
-    areaInput.value = Number.isFinite(consumption.actualVeneerAreaM2) ? String(round(consumption.actualVeneerAreaM2, 2)) : "";
+    areaInput.min = isDetailedPanelCalculation() && Number.isFinite(consumption.minimumActualVeneerAreaM2)
+      ? String(Math.ceil(consumption.minimumActualVeneerAreaM2 * 1000 - 1e-9) / 1000)
+      : "0.01";
+    areaInput.step = isDetailedPanelCalculation() ? "0.001" : "0.01";
+    areaInput.value = Number.isFinite(consumption.actualVeneerAreaM2) ? String(round(consumption.actualVeneerAreaM2, precision)) : "";
     areaInput.setAttribute("aria-label", `Фактическое количество шпона, ${sideLabel}, м²`);
     const areaSign = document.createElement("strong");
     areaSign.textContent = "м²";
@@ -6899,13 +7243,20 @@
       rowCount += 1;
     }
 
+    const renderedMixMatch = new Set();
     (result?.veneerConsumptions || []).forEach((consumption) => {
       if (consumption.mixMatchControlled) {
-        if (isDetailedPanelCalculation()) {
-          const note = document.createElement("p");
-          note.className = "field__note";
-          note.textContent = `MixMatch · ${consumption.materialName}: оплачивается ${round(consumption.mixMatchMaterialAreaM2, 2)} м² на материал. Минимум — 50 м² (ориентир для трёх пачек); одинаковый шпон на сторонах А и Б объединяется.`;
-          form.priceAdjustmentsList.append(note);
+        if (isDetailedPanelCalculation() && !renderedMixMatch.has(consumption.mixMatchOverrideId)) {
+          renderedMixMatch.add(consumption.mixMatchOverrideId);
+          renderAreaAdjustmentControl({
+            id: consumption.mixMatchOverrideId,
+            name: `MixMatch · ${consumption.materialName}`,
+            automaticArea: consumption.mixMatchAutomaticAreaM2,
+            area: consumption.mixMatchMaterialAreaM2,
+            minimumArea: consumption.mixMatchRequiredAreaM2,
+            detailedAllowed: true,
+            note: `Ориентир для трёх пачек — 50 м². Фактическую площадь можно уточнить, но она не должна быть меньше расчётной потребности ${round(consumption.mixMatchRequiredAreaM2, 2)} м².`
+          });
           rowCount += 1;
         }
         return;
@@ -6973,8 +7324,13 @@
       const sourceText = Number.isFinite(tech.calibrationSourceBaseThicknessMm) ? String(tech.calibrationSourceBaseThicknessMm).replace(".", ",") : "—";
       const afterText = Number.isFinite(tech.baseThicknessAfterCalibrationMm) ? String(tech.baseThicknessAfterCalibrationMm).replace(".", ",") : "—";
       const depthText = Number.isFinite(tech.calibrationDepth) ? `съём ${String(tech.calibrationDepth).replace(".", ",")} мм` : "съём не рассчитан";
-      const rateText = Number.isFinite(tech.calibrationRatePerM2) ? `${money(tech.calibrationRatePerM2)}/м²` : "ставка не рассчитана";
-      const costText = Number.isFinite(tech.calibrationCost) ? money(tech.calibrationCost) : "стоимость не рассчитана";
+      const productionOnly = isDetailedPanelCalculation() && tech.calibrationPricingStatus === "pending_production";
+      const mixedProduction = isDetailedPanelCalculation() && tech.calibrationPricingStatus === "calculated_and_pending_production";
+      const rateText = productionOnly ? "тариф уточняется производством"
+        : Number.isFinite(tech.calibrationRatePerM2) ? `${money(tech.calibrationRatePerM2)}/м²` : "ставка не рассчитана";
+      const costText = productionOnly ? "стоимость уточняется производством"
+        : mixedProduction ? `${money(tech.calibrationCost)} по рассчитанным позициям · остальные — стоимость производства`
+          : Number.isFinite(tech.calibrationCost) ? money(tech.calibrationCost) : "стоимость не рассчитана";
       const finishedText = Number.isFinite(tech.calibrationFinishedProductThicknessMm)
         ? ` · итог изделия ${String(tech.calibrationFinishedProductThicknessMm).replace(".", ",")} мм`
         : "";
@@ -6986,6 +7342,14 @@
     if(!result?.thickVeneerWorkAdjustment?.applies||Number.isFinite(result.thickVeneerWorkAdjustment.actualCoefficient))return false;
     return (result.itemResults||[]).some(item=>isExactFinishedDetail(item)&&!manufacturingCostFromProduction(item)&&
       !item.productionCost?.coveredReasons.includes('Работа с толстым шпоном'));
+  }
+  function isBlockingVeneerConsumption(consumption) {
+    if (consumption.valid) return false;
+    const unresolvedAutomaticYield = !isDetailedPanelCalculation()
+      && !consumption.actualVeneerAreaManual
+      && !Number.isFinite(consumption.recommendedVeneerAreaM2)
+      && !Number.isFinite(consumption.actualVeneerAreaM2);
+    return !unresolvedAutomaticYield;
   }
   function currentBlockingValidationIssues(result = lastCalculation) {
     const issues = [];
@@ -7100,7 +7464,10 @@
       add("sizeValidation", "корректные параметры размера", form.sizeRows, result.sizeValidation.error || "Проверьте размеры и количество.", form.sizeBlockError, "sizeBlock");
     }
 
-    const invalidVeneerConsumption = (result?.veneerConsumptions || []).find((consumption) => !consumption.valid);
+    // Общая проверка для бокового чека и экспорта.
+    // Неизвестный автоматический расход в кратком расчёте оставляет цену
+    // предварительной, но не блокирует PDF с неучтённой стоимостью шпона.
+    const invalidVeneerConsumption = (result?.veneerConsumptions || []).find(isBlockingVeneerConsumption);
     if (invalidVeneerConsumption) {
       add(`veneerActual:${invalidVeneerConsumption.id || invalidVeneerConsumption.materialId || "current"}`, "фактическое количество шпона", form.priceAdjustmentsBlock,
         invalidVeneerConsumption.validationError || "Укажите фактическое количество шпона.", null, "block");
@@ -7186,8 +7553,8 @@
         const minMeters = separateEdgeMinimumMeters();
         if (!Number.isFinite(meters) || meters <= 0) {
           add("separateEdgeMeters", "метраж отдельной кромки", form.separateEdgeMetersInput, "Укажите требуемый метраж отдельной кромки.", form.separateEdgeMetersError);
-        } else if (isQuickStandardPanel() && meters < minMeters) {
-          add("separateEdgeMeters", "метраж отдельной кромки", form.separateEdgeMetersInput, "Минимальный заказ кромки 50 пог. м", form.separateEdgeMetersError);
+        } else if (Number.isFinite(minMeters) && meters < minMeters) {
+          add("separateEdgeMeters", "метраж отдельной кромки", form.separateEdgeMetersInput, `Минимальный заказ кромки — ${minMeters} пог. м.`, form.separateEdgeMetersError);
         }
       }
       if (edgeMode === "attached") {
@@ -7512,6 +7879,7 @@
   function recalc() {
     syncQuickWallBack();
     syncQuickPaperBack();
+    syncDetailedPaperBack();
     syncQuickWallEdge();
     if (isQuickStandardPanel()) edgeWidthAutomatic.separate = true;
     syncEdgeWidthOptions("attached", { preserve: true });
@@ -7565,16 +7933,26 @@
     form.clientConditionNote.textContent = conditionNotes.join(" ");
     form.clientConditionNote.classList.toggle("is-hidden", conditionNotes.length === 0);
     setRowStatus(lastCalculation); renderTechOperations(lastCalculation); renderSpec(lastCalculation); renderPriceAdjustments(lastCalculation);
+    const partialKnownPrice = !lastCalculation.priceCalculationComplete && isDetailedPanelCalculation()
+      && lastCalculation.sizeValidation?.valid !== false && (lastCalculation.validSizes || []).length > 0
+      && Number.isFinite(lastCalculation.finalTotal) && roundMoney(lastCalculation.finalTotal) > 0;
+    if (form.finalPriceLabel) form.finalPriceLabel.textContent = partialKnownPrice ? "Рассчитанная часть, ₽/м²" : "Цена с учётом условий, ₽/м²";
     if (lastCalculation.priceCalculationComplete) {
       form.retailPriceValue.textContent = Number.isFinite(lastCalculation.retailAvgM2) ? money(lastCalculation.retailAvgM2) : "—";
       form.finalPriceValue.textContent = Number.isFinite(lastCalculation.avgM2) ? money(lastCalculation.avgM2) : "—";
       form.finalPriceNote.textContent = lastCalculation.manualDiscountApplied
         ? `Ручная скидка ${round(lastCalculation.manualDiscountPercent, 1)}% применена к розничной цене.`
         : "";
+    } else if (partialKnownPrice) {
+      form.retailPriceValue.textContent = "—";
+      form.finalPriceValue.textContent = Number.isFinite(lastCalculation.avgM2) ? money(lastCalculation.avgM2) : "—";
+      form.finalPriceNote.textContent = `Рассчитано: ${money(lastCalculation.finalTotal)} с НДС. ${lastCalculation.requiresProductionCost
+        ? "Стоимость производства ещё не включена."
+        : "Остальные составляющие пока не рассчитаны."} Окончательная стоимость — в общей спецификации.`;
     } else if (lastCalculation.requiresProductionCost && !(isDetailedPanelCalculation() && lastCalculation.sizeValidation?.valid === false)) {
       form.retailPriceValue.textContent = "—";
-      form.finalPriceValue.textContent = "Требуется стоимость производства";
-      form.finalPriceNote.textContent = "Окончательная стоимость определяется на общей странице спецификации.";
+      form.finalPriceValue.textContent = "Уточняется";
+      form.finalPriceNote.textContent = "Стоимость производства ещё не рассчитана. Окончательная сумма — в общей спецификации.";
     } else {
       form.retailPriceValue.textContent = "—";
       form.finalPriceValue.textContent = "—";
@@ -8344,7 +8722,7 @@
       form.saveStatus.textContent = lastCalculation.layoutValidation.error;
       return;
     }
-    const invalidVeneerConsumption = (lastCalculation.veneerConsumptions || []).find((consumption) => !consumption.valid);
+    const invalidVeneerConsumption = (lastCalculation.veneerConsumptions || []).find(isBlockingVeneerConsumption);
     if (invalidVeneerConsumption) {
       form.saveStatus.textContent = invalidVeneerConsumption.validationError || "Укажите фактическое количество шпона.";
       return;
@@ -8384,7 +8762,7 @@
     }
     const sideBMaterialForSave = sides === 2
       ? (sideBSelectionModeForSave === "same"
-        ? (isFaceOnlyExtraVeneer(selectedVeneerA) ? backsideBVariantFor(selectedVeneerA) : sideAMaterialForSave)
+        ? (backsideCategoryBRequired(selectedVeneerA) ? backsideBVariantFor(selectedVeneerA) : sideAMaterialForSave)
         : sideBSelectionModeForSave === "other" ? sideBOtherMaterialForSave : null)
       : null;
     const sideBMaterialCostForSave = sideBVeneerMaterialCost(lastCalculation, sideBSelectionModeForSave);
@@ -8475,7 +8853,7 @@
       veneerA: readyShirtSelected ? "" : veneerDisplayName(selectedVeneerA || selectedVeneerAGroup),
       veneerThickness: readyShirtSelected ? null : selectedVeneerThickness(),
       veneerAPriceLevel: readyShirtSelected ? "" : (lastCalculation.veneerPricings.find((x) => x.which === "A")?.levelName || ""),
-      sides, sideB: sides === 1 ? (form.reverseSideSelect.options[form.reverseSideSelect.selectedIndex]?.text || "") : (sideBSelectionModeForSave === "same" ? (isFaceOnlyExtraVeneer(selectedVeneerA) ? "Категория B той же породы (автоматически)" : veneerDisplayName(selectedVeneerA || selectedVeneerAGroup)) : sideBSelectionModeForSave === "rough" ? "Черновой шпон" : veneerDisplayName(selectedVeneerB || selectedVeneerBGroup)), veneerBPriceLevel: lastCalculation.veneerPricings.find((x) => x.which === "B")?.levelName || "",
+      sides, sideB: sides === 1 ? (form.reverseSideSelect.options[form.reverseSideSelect.selectedIndex]?.text || "") : (sideBSelectionModeForSave === "same" ? (backsideCategoryBRequired(selectedVeneerA) ? "Категория B той же породы (автоматически)" : veneerDisplayName(selectedVeneerA || selectedVeneerAGroup)) : sideBSelectionModeForSave === "rough" ? "Черновой шпон" : veneerDisplayName(selectedVeneerB || selectedVeneerBGroup)), veneerBPriceLevel: lastCalculation.veneerPricings.find((x) => x.which === "B")?.levelName || "",
       layout: needsLayoutSelection() ? (selectedLayout()?.name || "") : "",
       layoutId: needsLayoutSelection() ? (form.layoutSelect.value || "") : "",
       layoutAId: effectiveLayoutId(),
@@ -8644,6 +9022,10 @@
             thicknessMm: Number.isFinite(item.thicknessMm) ? item.thicknessMm : null,
             widthMm: item.selection?.widthMm ?? null,
             catalogItemId: item.selection?.catalogItemId || null,
+            priceCatalogSource: item.selection?.priceCatalogSource || null,
+            priceCatalogUrl: item.selection?.priceCatalogUrl || null,
+            priceCatalogCell: item.selection?.priceCatalogCell || null,
+            orderedProgram: Boolean(item.selection?.orderedProgram),
             stockProgram: Boolean(item.selection?.stockProgram),
             orderPosition: Boolean(item.selection?.orderPosition),
             priceConditionId: item.selection?.conditionId || "retail",
@@ -8679,6 +9061,10 @@
         operationRequiresProductionCost: lastCalculation.edge.operationRequiresProductionCost === true,
         materialPricingStatus: lastCalculation.edge.materialPricingStatus || "pending",
         stockProgram: Boolean(lastCalculation.edge.stockProgram),
+        priceCatalogSource: lastCalculation.edge.priceCatalogSource || null,
+        priceCatalogUrl: lastCalculation.edge.priceCatalogUrl || null,
+        priceCatalogCell: lastCalculation.edge.priceCatalogCell || null,
+        orderedProgram: Boolean(lastCalculation.edge.orderedProgram),
         orderPosition: Boolean(lastCalculation.edge.orderPosition),
         volumePriceLevels: lastCalculation.edge.volumePriceLevels || null,
         volumePriceRanges: lastCalculation.edge.volumePriceRanges || null
@@ -8757,6 +9143,11 @@
     form.baseThicknessSelect.addEventListener("change", () => {
       markFieldTouched("baseThickness");
       clearTouchedFields("calibration", "calibrationTarget");
+      if (isDetailedPanelCalculation()) {
+        form.calibrationTargetInput.value = "";
+        if (form.calibrationDepthInput) form.calibrationDepthInput.value = "";
+        clearValidationFor(form.calibrationTargetInput, "calibrationTarget", form.calibrationTargetError);
+      }
       updateBaseProductionCostHint();
       updateThicknessWarnings();
       updateEdgeUI();
@@ -9300,7 +9691,25 @@
     set(form.lacquerProcessSelect,finish.lacquerProcess);set(form.enamelVariantSelect,finish.enamelVariant);
     set(form.toningSelect,finish.toning);set(form.isolatorSelect,finish.isolator);
     const rows=Array.from(form.sizeRows.querySelectorAll('[data-size-row]'));
-    (record.finishByPosition||[]).forEach(item=>{const row=rows[item.position-1];if(row){const normalized=normalizeFinishConfig(item,{allowInherit:true}),global=currentGlobalFinishConfig();if(item.source==='position'||Object.keys(global).some(key=>normalized[key]!==global[key]))positionFinishState.set(row.dataset.rowId,normalized);}});
+    const finishSettingKeys = ["finishId", "lacquerExecution", "lacquerGloss", "lacquerProcess", "enamelVariant", "sides", "toning", "isolator"];
+    (record.finishByPosition || []).forEach(item => {
+      const row = rows[item.position - 1];
+      if (!row) return;
+      // Previously saved records may lack the source marker. Compare only editable
+      // finish settings, not calculated amounts, summary, position or identifiers.
+      const normalized = normalizeFinishConfig(item, { allowInherit: true });
+      // Legacy entries without editorState may not contain the sidesManual flag.
+      // Keep a saved per-position side count that differs from the veneer default.
+      if (normalized.finishId !== "inherit" && typeof item.sidesManual !== "boolean" &&
+          normalized.sides && normalized.sides !== defaultFinishSides()) {
+        normalized.sidesManual = true;
+      }
+      const globalConfig = currentGlobalFinishConfig();
+      const differsFromGlobal = finishSettingKeys.some(key => normalized[key] !== globalConfig[key]);
+      if (item.source === "position" || (item.source !== "global" && differsFromGlobal)) {
+        positionFinishState.set(row.dataset.rowId, normalized);
+      }
+    });
     positionFinishOverridesEnabled=positionFinishState.size>0;
     if(positionFinishOverridesEnabled){form.positionFinishOverrides.classList.remove('is-hidden');renderPositionFinishOverrides(false);}
     const edge=record.edge||{mode:'none'};set(form.edgeModeSelect,edge.mode);

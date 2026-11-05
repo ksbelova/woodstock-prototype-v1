@@ -58,6 +58,7 @@ body[data-panel-scenario="details"] [data-size-extra] {display:none!important}
               <select id="veneerThicknessSelect"></select>
               <span class="field__error" id="veneerThicknessError"></span>
               <span class="field__note is-hidden" id="quickPaperBackHint" aria-live="polite"></span>
+              <span class="prototype-review-note is-hidden" id="quickRoughOneMmReviewNote" role="note"><strong>Внутренняя пометка · согласовать с Александром.</strong> При лицевом слое 1 мм на обратной стороне временно используется черновой шпон толщиной 1 мм по ставке 440 ₽/м² — как для 1,5 мм. Нужно подтвердить толщину и тариф чернового шпона 1 мм, а также выяснить, нужна ли отдельная производственная доплата за лицевой шпон 1 мм и как её рассчитывать. Сейчас отдельная доплата не добавляется.</span>
             </label>
 
             <label class="field is-hidden" id="veneeredSidesField">
@@ -151,10 +152,10 @@ body[data-panel-scenario="details"] [data-size-extra] {display:none!important}
 
         <section class="form-block">
           <h2>Размер и количество</h2>
-          <label class="toggle-line"><input id="quickPatternTransition" type="checkbox" /><span>Нужен переход рисунка на деталях?</span></label>
           <div class="size-rows" id="sizeRows"></div>
           <p class="field__error is-hidden" id="sizeBlockError"></p>
           <button class="secondary-button add-size-row-button" id="addSizeRowBtn" type="button">Добавить ещё позицию</button>
+          <label class="toggle-line"><input id="quickPatternTransition" type="checkbox" /><span>Нужен переход рисунка на деталях?</span></label>
         </section>
 
         <section class="form-block">
@@ -219,7 +220,7 @@ body[data-panel-scenario="details"] [data-size-extra] {display:none!important}
             </div>
 
             <div class="field-grid field-grid--two">
-              <label class="field">
+              <label class="field" data-quick-hidden>
                 <span class="field__label">Фаска на кромке</span>
                 <select id="edgeBevelSelect">
                   <option value="no">Нет</option>
@@ -553,7 +554,7 @@ body[data-panel-scenario="details"] [data-size-extra] {display:none!important}
         </section>
       </form>
 
-<aside class="spec-panel"><div class="spec-panel__inner"><p class="kicker">Ориентировочный расчёт</p><h2 class="spec-title">Фасады и детали по вашим размерам</h2><div class="area-summary"><span class="area-summary__label">Общий метраж</span><strong id="quickArea">—</strong></div><div class="total-box"><span id="priceLabel">Ориентировочная стоимость с НДС</span><strong id="resultTotal">—</strong></div><p class="field-warning is-hidden" id="partialWarning"></p><button class="next-step-button" id="getCalculationButton" type="button">Скачать спецификацию и расчёт в PDF</button><p class="save-status" id="saveStatus" aria-live="polite"></p></div></aside></section>      <aside class="is-hidden">
+<aside class="spec-panel"><div class="spec-panel__inner"><p class="kicker">Ориентировочный расчёт</p><h2 class="spec-title">Фасады и детали по вашим размерам</h2><div class="area-summary"><span class="area-summary__label">Общий метраж</span><strong id="quickArea">—</strong></div><div class="total-box"><span id="priceLabel">Ориентировочная стоимость с НДС</span><strong id="resultTotal">—</strong></div><p class="spec-note">Это предварительный расчёт. Точную стоимость назовёт менеджер, когда уточнит детали вашего заказа</p><p class="field-warning is-hidden" id="partialWarning"></p><button class="next-step-button" id="getCalculationButton" type="button">Скачать спецификацию и расчёт в PDF</button><p class="save-status" id="saveStatus" aria-live="polite"></p></div></aside></section>      <aside class="is-hidden">
         <div class="spec-panel__inner">
           <p class="kicker">Расчёт позиции</p>
           <h2 class="spec-title">Плитные материалы и изделия</h2>
@@ -607,4 +608,4 @@ body[data-panel-scenario="details"] [data-size-extra] {display:none!important}
         Расчёт является предварительным и не является публичной офертой.
       </p>
     </div>
-  </dialog><script src="../../vendor/pdfmake/pdfmake.min.js"></script><script src="../../vendor/pdfmake/vfs_fonts.js"></script><script src="../../js/core/panels-core.js"></script><script src="../../js/core/quick-common.js"></script><script src="../../js/core/specification-state.js"></script><script src="../../js/quick-panels.js"></script><script src="../../js/detailed-panels.js"></script></body></html>
+  </dialog><script src="../../vendor/pdfmake/pdfmake.min.js"></script><script src="../../vendor/pdfmake/vfs_fonts.js"></script><script src="../../js/core/panels-core.js"></script><script src="../../js/core/quick-common.js"></script><script src="../../js/core/specification-state.js"></script><script src="../../js/quick-panels.js?v=20261103-ordered-edge"></script><script src="../../js/detailed-panels.js?v=20261103-ordered-edge"></script></body></html>

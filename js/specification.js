@@ -5,6 +5,9 @@
   const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const n=value=>Number.isFinite(value)?new Intl.NumberFormat('ru-RU',{maximumFractionDigits:4}).format(value):'—';
   const money=value=>Number.isFinite(value)?new Intl.NumberFormat('ru-RU',{style:'currency',currency:'RUB',maximumFractionDigits:2}).format(value):'Уточняется';
+  // Each displayed monetary line is rounded to kopecks before order summation.
+  const moneyCents=value=>Math.round((value+Math.sign(value)*Number.EPSILON*Math.max(1,Math.abs(value)))*100);
+  const roundMoney=value=>Number.isFinite(value)?moneyCents(value)/100:null;
   const join=values=>values.filter(value=>value!==undefined&&value!==null&&value!=='').join('\n');
   const uid=()=>typeof crypto.randomUUID==='function'?crypto.randomUUID():'position_'+Date.now()+'_'+Math.random().toString(36).slice(2);
   const metadataKey='woodstockDetailedOrder';
@@ -24,7 +27,22 @@
     try{sessionStorage.setItem(metadataKey,JSON.stringify(next));order=next;renderExtras();}catch(error){status('Не удалось сохранить данные заказа: '+error.message);}
   }
   function services(){return [...(order.packagingSelect?['Упаковка: '+order.packagingSelect]:[]),...Object.entries(serviceNames).filter(([id])=>order[id]).map(([,label])=>label)];}
-  function known(record){if(inProduction(record))return materialKnown(record);if(editorController&&editorIndex!==null&&records[editorIndex]?.id===record.id){const live=editorController.result?.();const value=live?.finalTotal??live?.total??null;return partial(record)&&value===0?null:value;}const value=Number.isFinite(record.specification?.knownTotal)?record.specification.knownTotal:Number.isFinite(record.total)?record.total:null;return partial(record)&&value===0?null:(Number.isFinite(value)?value+edgeDiscount(record).delta:value);}
+  function known(record){
+    // A partial record with no calculated monetary amount is unknown, not a zero-ruble offer.
+    if(inProduction(record)){
+      const materialCost=materialKnown(record);
+      return moneyCents(materialCost)!==0?materialCost:null;
+    }
+    if(editorController&&editorIndex!==null&&records[editorIndex]?.id===record.id){
+      const live=editorController.result?.();
+      const value=live?.finalTotal??live?.total??null;
+      const rounded=roundMoney(value);
+      return partial(record)&&(!Number.isFinite(rounded)||moneyCents(rounded)===0)?null:rounded;
+    }
+    const value=Number.isFinite(record.specification?.knownTotal)?record.specification.knownTotal:Number.isFinite(record.total)?record.total:null;
+    const rounded=Number.isFinite(value)?roundMoney(value+edgeDiscount(record).delta):null;
+    return partial(record)&&(!Number.isFinite(rounded)||moneyCents(rounded)===0)?null:rounded;
+  }
   function partial(record){if(record.sizes?.some(row=>row.productionFitStatus==='unconfirmed'))return true;if(inProduction(record))return !quoteState().valid||!materialsComplete(record);if(editorController&&editorIndex!==null&&records[editorIndex]?.id===record.id){const live=editorController.result?.();return !live||(productType==='plate'?!live.priceCalculationComplete:!Number.isFinite(live.total));}return record.pricingPartial===true||!Number.isFinite(record.total);}
     // Production quote belongs to the order and is never allocated to individual rows.
   const productionReason = reason => /^(Стоимость производства|Основа и производственные операции|Работа с толстым шпоном|Операция кромления:|Калибровка:|Фаска:|Финишное покрытие)/.test(reason);
@@ -37,9 +55,13 @@
   function inProduction(record){return productionScope().some(item=>item.id===record.id);}
   function effectiveWarnings(record){return inProduction(record)&&quoteState().valid&&materialsComplete(record)?(record.warnings||[]).filter(note=>!/ставк|стоимость.*производ|цен.*производ|производственн.*сумм|производственн.*стоим/i.test(note)):(record.warnings||[]);}
   function materialParts(record){
-    return (record.specification?.breakdown||[]).filter(item=>/^(Шпон|Чернов|Бумага|Готовая рубашка|Кромка — материал)/.test(item.label));
+    return (record.specification?.breakdown||[]).filter(item=>/^(Шпон|Чернов|Бумага|Готовая рубашка|Кромка(?: отдельно)? — материал)/.test(item.label));
   }
-  function materialKnown(record){return materialParts(record).reduce((sum,item)=>sum+(Number.isFinite(item.value)?item.value:0),0)+edgeDiscount(record).delta;}
+  function materialKnown(record){
+    const subtotal = materialParts(record).reduce((sum, item) =>
+      sum + (Number.isFinite(item.value) ? item.value : 0), 0);
+    return roundMoney(subtotal + edgeDiscount(record).delta);
+  }
   function materialsComplete(record){
     if(record.sizes?.some(row=>row.productionFitStatus==='unconfirmed'))return false;
     const missing=(record.sizes||[]).flatMap(row=>row.pendingCosts||[]).filter(reason=>!productionReason(reason));
@@ -59,8 +81,8 @@
   function decimal(value){const raw=String(value??'').trim().replace(/\s/g,'');return /^\d+(?:[.,]\d{1,2})?$/.test(raw)?Number(raw.replace(',','.')):null;}
   function quoteState(){
     const scope=productionScope(),quote=order.productionQuote;
-    const valid=scope.length>0&&!!quote&&quote.signature===quoteSignature()&&quote.cost>0&&quote.markup>=0&&(productType!=='plate'||quote.markup===50)&&Number.isSafeInteger(Math.round(quote.cost*100))&&Number.isSafeInteger(Math.round(quote.cost*(1+quote.markup/100)*100));
-    return {scope,valid,stale:!!quote&&!valid,cost:valid?quote.cost:null,markup:valid?quote.markup:null,clientCost:valid?quote.cost*(1+quote.markup/100):null};
+    const valid=scope.length>0&&!!quote&&quote.signature===quoteSignature()&&quote.cost>0&&quote.markup>=0&&Number.isSafeInteger(Math.round(quote.cost*100))&&Number.isSafeInteger(Math.round(quote.cost*(1+quote.markup/100)*100));
+    return {scope,valid,stale:!!quote&&!valid,cost:valid?quote.cost:null,markup:valid?quote.markup:null,clientCost:valid?roundMoney(quote.cost*(1+quote.markup/100)):null};
   }
   function renderProduction(){
     const section=$('productionSection');if(!section)return;
@@ -76,9 +98,19 @@
     return records.flatMap(record=>{
       const edge=record.edge;if(!edge||edge.mode==='none')return [];
       const parts=edge.mode==='attached'?(edge.positionSettings||[]).filter(item=>item.applies):[{...edge,position:null,calculatedMeters:edge.orderedMeters??edge.meters}];
-      return parts.map(part=>({record,part,key:JSON.stringify([part.catalogItemId||edge.catalogItemId,part.widthMm??edge.widthMm,part.thicknessMm??edge.thicknessMm]),
-        catalog:part.catalogItemId||edge.catalogItemId,meters:part.calculatedMeters||0,originalRate:part.pricePerRunningM??edge.pricePerRunningM,
-        levels:part.volumePriceLevels||edge.volumePriceLevels,ranges:part.volumePriceRanges||edge.volumePriceRanges}));
+      return parts.map(part=>{
+        // У кромления каждой детали собственный материал, ширина и тариф в selection.
+        // Общие параметры edge нельзя использовать вместо них при разных позициях.
+        const selection=part.selection||part;
+        const catalog=selection.catalogItemId||part.catalogItemId||(edge.mode==='attached'?null:edge.catalogItemId);
+        const width=part.widthMm??selection.widthMm??edge.widthMm;
+        const thickness=part.thicknessMm??selection.thicknessMm??edge.thicknessMm;
+        return {record,part,key:JSON.stringify([catalog,width,thickness]),catalog,
+          meters:part.calculatedMeters||0,
+          originalRate:selection.pricePerRunningM??part.pricePerRunningM??(edge.mode==='attached'?null:edge.pricePerRunningM),
+          levels:selection.volumePriceLevels??part.volumePriceLevels??edge.volumePriceLevels,
+          ranges:selection.volumePriceRanges??part.volumePriceRanges??edge.volumePriceRanges};
+      });
     });
   }
   function edgeDiscount(record){
@@ -88,7 +120,7 @@
         (range.maxRunningM===null||range.maxRunningM===undefined||(range.maxExclusive?total<range.maxRunningM:total<=range.maxRunningM)));
       const volume=range?entry.levels?.[range.id]:null;
       const rate=entry.catalog&&Number.isFinite(volume)&&Number.isFinite(entry.originalRate)?Math.min(volume,entry.originalRate):entry.originalRate;
-      return {...entry,rate,total,condition:rate<entry.originalRate?range:null,delta:Number.isFinite(rate)&&Number.isFinite(entry.originalRate)?entry.meters*(rate-entry.originalRate):0};
+      return {...entry,rate,total,condition:rate<entry.originalRate?range:null,delta:Number.isFinite(rate)&&Number.isFinite(entry.originalRate)?roundMoney(entry.meters*(rate-entry.originalRate)):0};
     });
     return {entries,delta:entries.reduce((sum,entry)=>sum+entry.delta,0)};
   }
@@ -97,7 +129,10 @@
     const discount=edgeDiscount(record),rates=[...new Set(discount.entries.map(entry=>entry.rate))];
     return {...edge,materialCost:Number.isFinite(edge.materialCost)?edge.materialCost+discount.delta:null,
       pricePerRunningM:rates.length===1?rates[0]:null,
-      positionSettings:edge.positionSettings?.map(item=>({...item,pricePerRunningM:discount.entries.find(entry=>entry.part.position===item.position)?.rate??item.pricePerRunningM})),
+      positionSettings:edge.positionSettings?.map(item=>{
+        const rate=discount.entries.find(entry=>entry.part.position===item.position)?.rate;
+        return {...item,pricePerRunningM:rate??item.selection?.pricePerRunningM??item.pricePerRunningM};
+      }),
       operationPricingStatus:inProduction(record)&&quoteState().valid?'included_in_production_quote':edge.operationPricingStatus};
   }
   function productionRows(){const state=quoteState();return state.scope.length?[
@@ -108,11 +143,17 @@
   function totals(){
     const values=records.map(known).filter(Number.isFinite);
     const quote=quoteState();
-    const total=values.reduce((sum,value)=>sum+value,0)+(quote.valid?quote.clientCost:0);
+    // Sum only already rounded order lines in integer kopecks.
+    const cents=values.reduce((sum,value)=>sum+moneyCents(value),0)+(quote.valid?moneyCents(quote.clientCost):0);
+    const hasKnownAmount=values.length>0||quote.valid;
+    const total=hasKnownAmount?cents/100:null;
     const vats=records.map((record,index)=>editorController&&index===editorIndex?(editorController.result?.()?.vat??null):record.specification?.knownVat??record.vat);
-    // Use VAT supplied by the original calculators. Unknown amounts are never replaced by zero.
-    const vat=productType==='plate'?(values.length?total*0.22/1.22:null):records.length&&values.length===records.length&&vats.every(Number.isFinite)?vats.reduce((sum,value)=>sum+value,0):null;
-    return {total:values.length?total:null,vat,partial:records.some(partial)||services().length>0};
+    // VAT is included in the rounded gross total, not added on top.
+    const vat=productType==='plate'
+      ? (hasKnownAmount?roundMoney(total*0.22/1.22):null)
+      : records.length&&values.length===records.length&&vats.every(Number.isFinite)
+        ? roundMoney(vats.reduce((sum,value)=>sum+value,0)):null;
+    return {total,vat,partial:records.some(partial)||services().length>0};
   }
   function table(headers,rows,classes=''){
     return '<div class="spec-table-wrap"><table class="spec-table '+classes+'"><thead><tr>'+headers.map(value=>'<th scope="col">'+esc(value)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(value=>'<td>'+esc(value??'—')+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
@@ -131,7 +172,7 @@
       join(['А: '+material(record.materialSides?.A,record.veneerA),'Б / оборот: '+(record.sides===2?material(record.materialSides?.B,record.sideB):record.sideB),'Фанеровка: '+record.sides+' ст.']),
       join(['А: '+(record.layout||'—'),'Б: '+(record.layoutB||'—'),record.veneerCut?'Рисунок А: '+record.veneerCut:'',record.veneerBCut?'Рисунок Б: '+record.veneerBCut:'']),
       join([n(row.length)+' × '+n(row.width)+' мм',n(row.quantity)+' шт.',row.classificationName,row.manufacturingType==='allowance20'?'С припуском: '+n(row.productionLength)+' × '+n(row.productionWidth)+' мм':'']),
-      join(['Шлифовка: '+(record.sanding?'да':'нет'),'Финиш: '+finish,attached?.applies?'Кромка: '+attached.sides+' · '+n(attached.calculatedMeters)+' пог. м':edge.mode==='separate'?'Кромка отдельно':'Кромка: нет',edge.bevel?'Фаска на кромке: да':'',tech.calibration?'Калибровка: да':'',row.cleanCuttingRequired?'Чистовой припил: да':'',tech.gluing?'Проклейка основы: да':'',row.transition?'Переход рисунка: да':'',row.comment?'Комментарий: '+row.comment:'',row.files?.length?'Файлы: '+row.files.join(', '):'']),
+      join(['Шлифовка: '+(record.sanding?'да':'нет'),'Финиш: '+finish,attached?.applies?'Кромка: '+(attached.sidesName||attached.sides||attached.sidesId||'—')+' · '+n(attached.calculatedMeters)+' пог. м':edge.mode==='separate'?'Кромка отдельно':'Кромка: нет',edge.bevel?'Фаска на кромке: да':'',tech.calibration?'Калибровка: да':'',row.cleanCuttingRequired?'Чистовой припил: да':'',tech.gluing?'Проклейка основы: да':'',row.transition?'Переход рисунка: да':'',row.comment?'Комментарий: '+row.comment:'',row.files?.length?'Файлы: '+row.files.join(', '):'']),
       join([n(row.area)+' м²','Объём: '+(volume||'—')+' м³','Вес основы: '+weightText+' кг']),
       inProduction(record)?'Производство — общей суммой':price(row.knownPricePerPiece??row.pricePerPiece)+' / шт.\n'+price(row.knownPricePerM2??row.pricePerM2)+' / м²',inProduction(record)?'Материалы — в итоге изделия':price(row.knownSubtotal??row.total),remainingParameters(record,row)];
   }
@@ -141,10 +182,10 @@
   }
   function edgeRows(){return records.flatMap((record,index)=>{
     const edge=effectiveEdge(record);if(!edge||edge.mode==='none')return [];
-    const base=[String(index+1),join([edge.typeName,edge.displayName||edge.veneerName||edge.name,edge.comment]),n(edge.widthMm)+' / '+(edge.thicknessApplicable?n(edge.thicknessMm):'—')];
+    const base=[String(index+1),join([edge.typeName,edge.displayName||edge.veneerName||edge.name,edge.comment,edge.priceCatalogSource]),n(edge.widthMm)+' / '+(edge.thicknessApplicable?n(edge.thicknessMm):'—')];
     const rows=[];
     if(edge.mode==='attached'){
-      (edge.positionSettings||[]).filter(item=>item.applies).forEach(item=>rows.push([(index+1)+'.'+item.position,base[1],n(item.widthMm??edge.widthMm)+' / '+n(item.thicknessMm??edge.thicknessMm),item.sides,n(item.geometricMeters),n(item.calculatedMeters),money(item.pricePerRunningM??edge.pricePerRunningM),'В составе итога ниже','В составе итога ниже']));
+      (edge.positionSettings||[]).filter(item=>item.applies).forEach(item=>rows.push([(index+1)+'.'+item.position,join([edge.typeName,edge.displayName||edge.veneerName||edge.name,edge.comment,item.priceCatalogSource||edge.priceCatalogSource]),n(item.widthMm??edge.widthMm)+' / '+n(item.thicknessMm??edge.thicknessMm),item.sidesName||item.sides||item.sidesId||'—',n(item.geometricMeters),n(item.calculatedMeters),money(item.pricePerRunningM??item.selection?.pricePerRunningM??edge.pricePerRunningM),'В составе итога ниже','В составе итога ниже']));
     }
     rows.push([...base,edge.mode==='attached'?'Итого по изделию':edge.sides||'—',n(edge.geometricMeters),join([n(edge.orderedMeters??edge.meters??edge.calculatedMeters),edge.manuallyAdjusted?'Ручная корректировка':'Автоматически']),money(edge.pricePerRunningM),money(edge.materialCost),edge.operationPricingStatus==='included_in_production_quote'?'В стоимости производства':edge.operationPricingStatus==='not_required'?'Не требуется':money(edge.operationCost)]);
     return rows;
@@ -490,7 +531,11 @@
     if(editorController&&productType==='plate'){
       if(editorIndex!==null)rows=rows.filter(row=>!String(row[0]).startsWith(String(editorIndex+1)+'.')&&String(row[0])!==String(editorIndex+1));
       const edge=editorController.result()?.edge;
-      if(edge&&edge.mode!=='none')rows.push([editorIndex===null?'Новая позиция':String(editorIndex+1),'','','',n(edge.geometricMeters),n(edge.calculatedMeters),money(edge.pricePerRunningM),money(edge.materialCost),edge.operationPricingStatus==='included_in_production_quote'?'В стоимости производства':edge.operationPricingStatus==='not_required'?'Не требуется':money(edge.operationCost),'']);
+      if(edge&&edge.mode!=='none'){
+        // В отдельной кромке расчётный метраж по торцам может отличаться от вручную заказанного.
+        const metersToOrder=edge.mode==='separate'?(edge.orderedMeters??edge.meters??edge.calculatedMeters):edge.calculatedMeters;
+        rows.push([editorIndex===null?'Новая позиция':String(editorIndex+1),'','','',n(edge.geometricMeters),n(metersToOrder),money(edge.pricePerRunningM),money(edge.materialCost),edge.operationPricingStatus==='included_in_production_quote'?'В стоимости производства':edge.operationPricingStatus==='not_required'?'Не требуется':money(edge.operationCost),'']);
+      }
     }
     $('edgeSection').classList.toggle('is-hidden',!rows.length);if(!rows.length){$('edgeTable').innerHTML='';return;}
     const container=document.createElement('div');container.innerHTML=table([...edgeHeaders,'Действия'],rows);
@@ -601,7 +646,7 @@
     if(order.productionQuote)order.productionQuote.signature='';saveOrder();
   }));
   $('confirmProduction').addEventListener('click',()=>{
-    const cost=decimal($('productionCostInput').value),markup=productType==='plate'?50:decimal($('productionMarkupInput').value);
+    const cost=decimal($('productionCostInput').value),markup=decimal($('productionMarkupInput').value);
     if(!productionScope().length||cost===null||cost<=0||!Number.isSafeInteger(Math.round(cost*100))||markup===null||markup<0||!Number.isSafeInteger(Math.round(cost*(1+markup/100)*100))){$('productionStatus').textContent='Введите положительную себестоимость с точностью до копеек и неотрицательную наценку. Итоговая сумма должна быть корректным денежным значением.';return;}
     order.productionQuote={cost,markup,signature:quoteSignature(),confirmedAt:new Date().toISOString()};saveOrder();render();
   });
@@ -634,8 +679,7 @@
     let changed=false;records.forEach(record=>{if(!record.id){record.id=uid();changed=true;}});if(changed)persist();
     document.querySelectorAll('[data-order]').forEach(node=>{if(order[node.id]!==undefined){if(node.type==='checkbox')node.checked=order[node.id];else node.value=order[node.id];}});
     $('productionCostInput').value=order.productionCostDraft??order.productionQuote?.cost??'';
-    $('productionMarkupInput').value=productType==='plate'?'50':order.productionMarkupDraft??order.productionQuote?.markup??'50';
-    if(productType==='plate'){$('productionMarkupInput').readOnly=true;$('productionMarkupInput').setAttribute('aria-readonly','true');}
+    $('productionMarkupInput').value=order.productionMarkupDraft??order.productionQuote?.markup??'50';
     saveOrder();render();prepareLegacyRecords();
   }catch(error){status('Не удалось открыть спецификацию: '+error.message);$('downloadSpecification').disabled=true;}
 })();

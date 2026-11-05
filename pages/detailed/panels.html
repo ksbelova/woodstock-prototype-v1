@@ -36,7 +36,7 @@
           </div>
 
           <p class="field-warning is-hidden" id="heavyPlateWarning"></p>
-          <p class="field-warning is-hidden" id="baseProductionCostHint"></p>
+          <p class="base-production-note is-hidden" id="baseProductionCostHint"></p>
         </section>
 
         <section class="form-block">
@@ -447,7 +447,7 @@
           </label>
 
           <div class="price-reference price-reference--result" id="finalPriceField">
-            <span>Цена с учётом условий, ₽/м²</span>
+            <span id="finalPriceLabel">Цена с учётом условий, ₽/м²</span>
             <strong id="finalPriceValue">—</strong>
             <small id="finalPriceNote"></small>
           </div>
@@ -495,7 +495,8 @@
                 <div><dt id="specPricePerM2Label">Цена за м² с НДС</dt><dd id="specPricePerM2">—</dd></div>
                 <div><dt id="specPricePerPieceLabel">Цена за шт. / лист</dt><dd id="specPricePerPiece">—</dd></div>
               </dl>
-              <div class="total-box"><span>Итого с НДС</span><strong id="specTotal">—</strong><small id="specVat">В том числе НДС 22%: —</small></div>
+              <div class="total-box"><span id="specTotalLabel">Итого с НДС</span><strong id="specTotal">—</strong><small id="specVat">В том числе НДС 22%: —</small></div>
+              <p id="specPartialNote" class="field__note is-hidden"></p>
             </section>
           </div>
           <button class="next-step-button" id="addToSpecButton" type="button">Добавить в спецификацию</button>
@@ -507,6 +508,6 @@
   <script src="../../js/core/panels-core.js?v=20261028-edge-threshold"></script>
   <script src="../../js/core/specification-state.js"></script>
   <script src="../../js/specification-bridge.js"></script>
-  <script src="../../js/detailed-panels.js?v=20261029-catalog-audit2"></script>
+  <script src="../../js/detailed-panels.js?v=20261105-calibration-mixed-fix"></script>
 </body>
 </html>

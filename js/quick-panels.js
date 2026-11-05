@@ -28,6 +28,87 @@
   }),
   changed:result=>{if(api)render(result);}
  };
+
+ const preliminaryDisclaimer='Это предварительный расчёт. Точную стоимость назовёт менеджер, когда уточнит детали вашего заказа';
+ // Здесь меняется только язык сообщений для клиента, а не расчётные предупреждения.
+ function clientWarningReason(raw){
+   const source=String(raw||'').trim();
+   if(!source)return '';
+   if(/^Присадка:/i.test(source))return 'присадка — отверстия под петли и/или ручки';
+   if(/^Не выбрана основа/i.test(source))return 'стоимость основы (материал не выбран)';
+   if(/^Не задана корректная толщина основы/i.test(source))return 'стоимость основы (толщина не указана)';
+   if(/^Не выбран тип материала/i.test(source))return 'стоимость шпона (тип не выбран)';
+   if(/^Не выбрана доступная толщина лицевого шпона/i.test(source))return 'стоимость шпона (толщина не выбрана)';
+   if(/^Не добавлен ни один заполненный размер/i.test(source))return 'стоимость изделий (не указаны размеры)';
+   if(/^Введите количество целым числом/i.test(source))return 'стоимость изделий (уточните количество)';
+   if(/^(Выберите раскладку шпона|Выбранная раскладка недоступна)/i.test(source))return 'стоимость раскладки шпона (уточните раскладку)';
+   if(/^Добавьте описание раскладки/i.test(source))return 'стоимость раскладки по индивидуальному заданию';
+   if(/^Готовая рубашка:/i.test(source))return 'стоимость приклеивания готового шпона';
+   if(/^(Сторона Б: цена категории|Сторона Б.*Extra\/AA|Лицевой слой 2 мм:)/i.test(source))return 'стоимость шпона обратной стороны';
+   if(/^Черновая сторона Б:/i.test(source)||/толщины чернового шпона нет подтверждённой ставки/i.test(source))return 'стоимость чернового шпона обратной стороны';
+   if(/(ставка бумаги на обратной стороне|Для бумаги на обратной стороне ставка)/i.test(source))return 'стоимость бумаги на обратной стороне';
+   if(/^Лак полиуретановый:/i.test(source))return 'покрытие полиуретановым лаком';
+   if(/^Глянец 100%:/i.test(source))return 'покрытие с блеском 100%';
+   if(/технологической схемы\/числа сторон нет подтверждённого/i.test(source))return 'стоимость выбранного покрытия';
+   if(/^Фаска:/i.test(source))return 'стоимость фаски на кромке';
+   if(/(операци[яи] кромления|кромление требуется|тарифа операции кромления)/i.test(source))return 'работа по кромлению';
+   if(/(кромка отсутствует в складском прайсе|складской кромки нет цены)/i.test(source))return 'стоимость выбранной кромки';
+   if(/^Калибровка ДСП:/i.test(source)||/Для калибровки не задана базовая ставка/i.test(source))return 'обработка основы до нужной толщины';
+   if(/чистовой припил|тарифа припила/i.test(source))return 'чистовой распил изделия';
+   if(/^(Диагональ 45°: ставка|Не подтверждена ставка диагонали)/i.test(source))return 'работа по диагональной раскладке шпона';
+   if(/Не подтверждена ставка ёлочки/i.test(source))return 'работа по раскладке шпона «ёлочкой»';
+   if(/^Нестандарт со шпоном/i.test(source))return 'дополнительная работа со шпоном выбранной толщины';
+   if(/(нет подтверждённой ставки нестандарта|Стандарт по запросу: нет подтверждённой ставки|Базовая стоимость не включена)/i.test(source))return 'стоимость изготовления изделия из выбранной основы';
+   if(/(для компонента «|нет подтверждённой цены|не подставляется)/i.test(source))return 'стоимость выбранного материала или производственной операции';
+   if(/^(Фактическое количество шпона не задано|Укажите фактическое количество шпона)/i.test(source))return 'стоимость шпона (требуется уточнить расход)';
+   if(/готовой рубашки/i.test(source))return 'стоимость готового шпона';
+   return source.replace(/\s*Расчёт неполный[.;]?/gi,'').replace(/[.\s]+$/,'');
+ }
+ function clientWarningReasons(result,boring){
+   const raw=[...(result?.warnings||[]),...(boring?['Присадка: стоимость определяет производство.']:[])];
+   return [...new Set(raw.map(clientWarningReason).filter(Boolean))];
+ }
+ function preliminaryPartialText(result,boring){
+   const reasons=clientWarningReasons(result,boring);
+   const list=reasons.length?reasons.join('; '):'стоимость материалов или работ, которые требуется уточнить';
+   return 'Это предварительный расчёт. В сумму пока не вошли: '+list+'. Менеджер уточнит детали заказа и назовёт стоимость, максимально близкую к итоговой';
+ }
+ // Внутренние вопросы из вкладок «Краткий» и «Второй круг правок».
+ // Пометки принадлежат только интерфейсу: productDocument не читает их из DOM.
+ function renderReviewNotes(){
+  const form=api.form,face=Number(form.veneerThicknessSelect.value);
+  const faceSelected=Boolean(form.veneerThicknessSelect.value);
+  const finish=form.finishSelect.value,toning=['lacquer_acrylic','lacquer_polyurethane'].includes(finish);
+  const note=(id,anchorId,text,visible=true)=>{
+   const anchor=$(anchorId);if(!anchor)return;
+   let element=$(id);
+   if(!element){
+    element=document.createElement('span');element.id=id;element.className='prototype-review-note';element.setAttribute('role','note');
+    const heading=document.createElement('strong');heading.textContent='Внутренняя пометка · требует согласования. ';
+    element.append(heading,document.createTextNode(text));
+    (anchor.closest('.field')||anchor).append(element);
+   }
+   element.classList.toggle('is-hidden',!visible);
+  };
+  if(wall){
+   note('quickOnePointFiveReviewNote','veneerThicknessSelect','Для стеновых панелей при лицевом слое 1,5 мм принят шпон с одной стороны и черновой шпон на обороте. Итоговый вариант нужно сообщить производству: ранее на встрече звучало правило о шпоне с двух сторон от 1,5 мм.',faceSelected&&Math.abs(face-1.5)<0.001);
+   note('quickTwoMmFinishReviewNote','veneerThicknessSelect','При лицевом слое 2 мм покрытие считается только по стороне А, по аналогии с 2,5 мм. Применимость этого правила к 2 мм отдельно не подтверждена.',faceSelected&&Math.abs(face-2)<0.001);
+   note('quickEdgeSidesReviewNote','edgeSidesSelect','Три варианта сторон кромления — по периметру, по длинным или по коротким сторонам — выбраны командой. Их достаточность для стеновых панелей требует подтверждения производства.');
+   note('quickEdgeWidthReviewNote','edgeThicknessSelect','Правило подбора ближайшей ширины кромки с запасом минимум 4 мм к итоговой толщине изделия выведено командой из примеров производства. Формулировка правила требует подтверждения.');
+   note('quickFinishDescriptionReviewNote','finishSelect','Описания свойств акрилового и полиуретанового лаков и эмали подготовлены командой по общим свойствам материалов. Их нужно сверить с покрытиями, которые использует Woodstock.',Boolean(finish)&&finish!=='none');
+   note('quickPolyurethaneReviewNote','finishSelect','Для полиуретанового лака нет подтверждённого тарифа: его стоимость не входит в предварительную сумму. Нужно согласовать, оставлять ли этот вариант в кратком расчёте.',finish==='lacquer_polyurethane');
+  }
+  if(standard){
+   const edge=form.edgeModeSelect.value==='separate';
+   note('quickSeparateEdgeTypeReviewNote','separateEdgeTypeSelect','Поле «Тип кромки» временно сохранено. Решение о его составе и необходимости в кратком расчёте стандартной плиты пока не принято.',edge);
+   note('quickSeparateEdgeMinimumReviewNote','separateEdgeMetersInput','Временно применяется минимум 50 пог. м. Производство обсуждало снижение до 20 пог. м; окончательный минимум и его применение к позиции или всей заявке не подтверждены.',edge);
+   note('quickSeparateEdgeWidthReviewNote','separateEdgeFields','Ширина временно подбирается по правилу стеновых панелей: ближайшая ширина из прайса с запасом минимум 4 мм к итоговой толщине плиты. Правило выведено командой из примеров производства. Для отдельной кромки может требоваться большая ширина; возможность её выбора клиентом пока не согласована.',edge);
+  }
+  if(wall||scenario==='details'){
+   note('quickToningRateReviewNote','quickToningField','В расчёте применяется доплата за тонировку 1000 ₽/м². Источник этого тарифа в записях встреч не указан; ставку нужно подтвердить у производства.',toning&&form.toningSelect.value==='yes');
+  }
+  if(scenario==='details')note('quickBoringDescriptionReviewNote','boringSelect','Вопрос и пояснение о присадке сформулированы командой. Диаметр отверстия под петлю 35 мм взят из свода правок и отдельно представителем производства не подтверждён.');
+ }
  function render(result){
   if(syncing)return;
   const form=api.form;
@@ -36,7 +117,7 @@
    const thickness=Number(form.veneerThicknessSelect.value);
    const two=Number(form.veneeredSidesSelect.value)===2;
    $('quickReverseSide').textContent=!form.veneerThicknessSelect.value?'—':two
-    ? (Math.abs(thickness-2.5)<0.001?'шпон ясеня 2,5 мм':'шпон той же породы, 2 мм')
+    ? 'тот же шпон, что и на стороне А'
     : form.reverseSideSelect.value==='paper'?'бумага':'черновой шпон';
   }
   const certified=wall&&result?.base?.id==='gsp';
@@ -71,30 +152,54 @@
   if(form.finishSelect.value==='enamel'&&!form.enamelVariantSelect.value){syncing=true;form.enamelVariantSelect.value='Грунт + эмаль';api.recalculate();syncing=false;result=api.result();}
   const ready=!!result?.base&&!!result.validSizes?.length&&!api.issues().length&&(standard||certified||!!form.finishSelect.value);
   const boring=$('boringSelect')?.value==='yes';
+  // Внутренние отметки спорных допущений: они не влияют на цену и не входят в PDF.
+  const faceThickness=Number(form.veneerThicknessSelect.value);
+  const compensatorNote=$('quickCompensatorReviewNote');
+  if(compensatorNote){
+    const selected=Boolean(form.veneerThicknessSelect.value)&&[2,2.5].some(value=>Math.abs(faceThickness-value)<0.001);
+    compensatorNote.classList.toggle('is-hidden',!selected);
+  }
+  const roughOneMmNote=$('quickRoughOneMmReviewNote');
+  if(roughOneMmNote){
+    const roughSelected=Boolean(form.veneerThicknessSelect.value)
+      &&Math.abs(faceThickness-1)<0.001
+      &&Number(form.veneeredSidesSelect.value)===1
+      &&form.reverseSideSelect.value==='rough';
+    roughOneMmNote.classList.toggle('is-hidden',!roughSelected);
+  }
   const hasKnownPrice=Number.isFinite(result?.finalTotal)&&result.finalTotal>0;
+  renderReviewNotes();
   const partial=(hasKnownPrice||ready)&&(!ready||!result.priceCalculationComplete||boring);
   $('resultTotal').textContent=!hasKnownPrice&&!ready?'—':partial?(hasKnownPrice?money(result.finalTotal)+' *':'Стоимость рассчитает менеджер'):money(result.finalTotal);
-  $('priceLabel').textContent=partial?'Стоимость рассчитанной части с НДС':'Ориентировочная стоимость с НДС';
+  $('priceLabel').textContent='Ориентировочная стоимость с НДС';
   $('partialWarning').classList.toggle('is-hidden',!partial);
-  $('partialWarning').textContent=partial?'Расчёт неполный. '+[...(result.warnings||[]),...(boring?['Присадка: стоимость определяет производство.']:[])].join(' '):'';
+  $('partialWarning').textContent=partial?preliminaryPartialText(result,boring):'';
   $('quickArea').textContent=result?.base&&result.totalArea>0?number(result.totalArea)+' м²':'—';
   if((wall||standard)&&$('quickEdgeWidth')) {
    const width=result?.edge?.widthMm;
    $('quickEdgeWidth').textContent=result?.edge?.mode===(standard?'separate':'attached')&&Number.isFinite(width)&&width>0?number(width)+' мм':'—';
   }
+  const sourceList=document.querySelector('.spec-panel .spec-list');
+  if(sourceList){
+   let sourceRow=$('quickEdgePriceSourceRow');
+   if(!sourceRow){sourceRow=document.createElement('div');sourceRow.id='quickEdgePriceSourceRow';const label=document.createElement('dt');label.textContent='Цена кромки';const value=document.createElement('dd');value.id='quickEdgePriceSource';sourceRow.append(label,value);sourceList.append(sourceRow);}
+   const source=result?.edge?.mode!=='none'?result?.edge?.priceCatalogSource:'';
+   sourceRow.classList.toggle('is-hidden',!source);$('quickEdgePriceSource').textContent=source||'';
+  }
+
  }
  function productDocument(record,result){
   const side=(material,pattern)=>material?[`${material.name||'—'} · ${number(material.thicknessMm)} мм`,pattern].filter(Boolean).join(' · '):record.sideB||'—';
   const edge=record.edge||{};
   const certified=wall&&record.baseId==='gsp';
-  const edgeText=certified?'По сертификату КМ1 (уточняет производство)':edge.mode==='none'?'Не нужна':[edge.typeName,edge.veneerName||edge.name,edge.thicknessApplicable?number(edge.thicknessMm)+' мм':'',number(edge.widthMm)+' мм',number(edge.meters??edge.orderedMeters)+' пог. м'].filter(Boolean).join(' · ');
+  const edgeText=certified?'По сертификату КМ1 (уточняет производство)':edge.mode==='none'?'Не нужна':[edge.typeName,edge.veneerName||edge.name,edge.thicknessApplicable?number(edge.thicknessMm)+' мм':'',number(edge.widthMm)+' мм',number(edge.meters??edge.orderedMeters)+' пог. м',edge.priceCatalogSource].filter(Boolean).join(' · ');
   const edgeForPosition=row=>{
    if(edge.mode==='none')return 'Не нужна';
    if(edge.mode==='separate')return 'Отдельная спецификация';
    const position=edge.positionSettings?.find(item=>item.position===row.position);
    if(!position)return 'См. спецификацию кромки';
    if(!position.applies)return 'Не нужна';
-   return [edge.typeName,edge.veneerName||edge.name,Number.isFinite(position.thicknessMm)?number(position.thicknessMm)+' мм':'',Number.isFinite(position.widthMm)?number(position.widthMm)+' мм':'',position.sides,number(position.calculatedMeters)+' пог. м'].filter(Boolean).join(' · ');
+   return [edge.typeName,edge.veneerName||edge.name,Number.isFinite(position.thicknessMm)?number(position.thicknessMm)+' мм':'',Number.isFinite(position.widthMm)?number(position.widthMm)+' мм':'',position.sides,number(position.calculatedMeters)+' пог. м',position.priceCatalogSource||edge.priceCatalogSource].filter(Boolean).join(' · ');
   };
   const boring=$('boringSelect')?.value==='yes';
   const rows=record.sizes.map(row=>{
@@ -109,7 +214,7 @@
    `${value(row.knownPricePerPiece)} / шт.\n${value(row.knownPricePerM2)} / м²`,value(row.knownSubtotal)
   ];});
   const partial=!result.priceCalculationComplete||$('boringSelect')?.value==='yes';
-  const notes=[];
+  const notes=[{text:preliminaryDisclaimer,style:'infoSmall',margin:[0,4,0,8]}];
   const rowPartial=record.sizes.some(row=>row.pricingPartial)||boring;
   if(rowPartial)notes.push({text:'* Частичная стоимость позиции: учтены только рассчитанные составляющие.',style:'infoSmall'});
   if(Number.isFinite(result.orderLevelUnallocatedCost)&&Math.abs(result.orderLevelUnallocatedCost)>0.000001)notes.push({text:'Общие рассчитанные затраты заказа, не распределённые по изделиям: '+money(result.orderLevelUnallocatedCost)+'. Они включены в итог один раз.',style:'infoSmall'});
@@ -118,14 +223,14 @@
   const breakdownRounding=round(round(result.finalTotal)-result.breakdown.reduce((sum,item)=>sum+round(item.value),0));
   if(rowRounding||breakdownRounding)notes.push({text:'Расчёт выполнен без промежуточного округления. Разница округления: по позициям '+money(rowRounding)+'; по составляющим '+money(breakdownRounding)+'.',style:'infoSmall'});
   if(certified)notes.push({text:"ГСП: состав кромки и покрытия по сертификату КМ1 подтверждает производство.",style:"infoText"});
-  if(partial)notes.push({text:'Расчёт неполный. Указана только рассчитанная часть. Полную стоимость подтвердит менеджер.',style:'infoText',margin:[0,8,0,4]},{ul:[...result.warnings,...($('boringSelect')?.value==='yes'?['Присадка: стоимость производства.']:[])],style:'infoSmall'});
+  if(partial)notes.push({text:preliminaryPartialText(result,boring),style:'infoText',margin:[0,8,0,4]});
   notes.push({text:'Рассчитанные составляющие',style:'sectionTitle'},{table:{headerRows:1,dontBreakRows:true,widths:Common.fitPdfTableWidths([360,179],3),body:[[{text:'Составляющая',bold:true},{text:'Стоимость с НДС',bold:true}],...result.breakdown.map(x=>[x.label,money(x.value)])]},layout:Common.pdfTableLayout()});
   if(edge.mode!=='none')notes.push({text:'Кромка — данные отдельной спецификации',style:'sectionTitle'},{text:edgeText,style:'infoSmall'});
   const files=[...new Set([...contact.fileNames(),...(record.layoutTzFiles||[]),...record.sizes.flatMap(row=>row.files||[])])];
   if(record.layoutTzComment)notes.push({text:'Требования к раскладке: '+record.layoutTzComment,style:'infoText'});
   if(wall||scenario==='details') notes.push({text:(wall?'Переход рисунка на панелях: ':'Переход рисунка на деталях: ')+(record.patternTransitionRequested?'да':'нет'),style:'infoText'});
   notes.push({text:'Дополнительные требования',style:'sectionTitle'},{text:record.comment||'—',style:'infoText'},{text:'Файлы: '+(files.join(', ')||'нет'),style:'infoSmall'},{text:'Связь с менеджером: '+($('managerContactInput').checked?'нужна':'не запрошена'),style:'infoSmall'});
-  return {dontBreakRows:false,title,numberPrefix:'КР-ПЛ-',subtitle:'Краткий расчёт плит',widths:[12,52,110,103,57,24,38,65,65],header:['№','Основа','Шпон','Раскладка и обработка','Размер, мм','Шт.','Площадь, м²','Цена с НДС','Сумма с НДС'].map(text=>({text,style:'tableHeader'})),rows,afterPrice:notes};
+  return {dontBreakRows:false,title,numberPrefix:'КР-ПЛ-',subtitle:'Краткий расчёт плит',preliminaryPriceLabels:true,widths:[12,52,110,103,57,24,38,65,65],header:['№','Основа','Шпон','Раскладка и обработка','Размер, мм','Шт.','Площадь, м²','Цена с НДС','Сумма с НДС'].map(text=>({text,style:'tableHeader'})),rows,afterPrice:notes};
  }
  // Standard sizes are tied to the chosen base. A cleared base must not retain a previously selected format.
  function clearBaseDependentStandardSizes(){
@@ -165,6 +270,8 @@
   contact=Common.createContact({form:f,ui,submitted:()=>submitted,renderAll:()=>api.recalculate()});contact.bind();
   f.files.addEventListener('change',()=>api.recalculate());
   $('getCalculationButton').addEventListener('click',submit);
+  // Присадка влияет на полноту стоимости, обновляем чек без другого действия.
+  $('boringSelect')?.addEventListener('change',()=>render(api.result()));
   if(wall||scenario==='details') $('quickToningCheckbox')?.addEventListener('change',()=>{
    api.form.toningSelect.value=['lacquer_acrylic','lacquer_polyurethane'].includes(api.form.finishSelect.value)&&$('quickToningCheckbox').checked?'yes':'no';
    api.form.toningSelect.dispatchEvent(new Event('change',{bubbles:true}));
@@ -179,6 +286,9 @@
    const prepareRows=()=>{document.querySelectorAll('[data-size-row]').forEach(row=>{if(!row.dataset.sizeMode)api.customSize(row,{focus:false});});};
    prepareRows();new MutationObserver(prepareRows).observe(api.form.sizeRows,{childList:true});
   }
+  // В кратком расчёте фасадов скрытая фаска не должна попадать в цену.
+  // Элемент остаётся в DOM для общего расчётного контроллера.
+  if(scenario==='details') api.form.edgeBevelSelect.value='no';
   // These are the existing detailed fields, hidden for the shortened client scenario.
   ['toningSelect','isolatorSelect','positionFinishToggle','positionEdgeToggle','lacquerExecutionSelect','lacquerProcessSelect','enamelVariantSelect','edgeOrderPriceInput','separateEdgeOrderPriceInput'].forEach(id=>{$(id)?.closest('.field')?.setAttribute('data-quick-hidden','');});
   api.form.finishSelect.dispatchEvent(new Event('change',{bubbles:true}));api.recalculate();render(api.result());
