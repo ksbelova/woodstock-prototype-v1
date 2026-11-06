@@ -217,7 +217,7 @@
     const details=supplemental(record);
     const shown=record.productType==='flooring'
       ? /^(Нижний слой|Верхний слой|Толщина|Порода дерева|Наименование|Тип шпона|Тип рисунка|Сортировка|Ширина|Длина|Наличие фаски|Тип соединения|Раскладка|Угол торцевого реза|Описание раскладки|Файлы индивидуальной раскладки|Итого к расчёту|Площадь помещения|Запас на укладку|Финишное покрытие|Степень блеска|Цена за м² с НДС)$/
-      : /^(Основа|Толщина основы|Фанерованные стороны|Сторона А|Тип шпона стороны А|Толщина шпона стороны А|Тип рисунка стороны А|Раскладка А|Раскладка Б|Сторона Б|Материал стороны Б|Тип шпона стороны Б|Толщина материала стороны Б|Тип рисунка стороны Б|Шлифовка|Финишное покрытие|Кромка|Стороны кромления|Ширина кромки|Толщина кромки|Калибровка|Чистовой припил|Проклейка основы|Фаска на кромке)$/;
+      : /^(Основа|Толщина основы|Фанерованные стороны|Сторона А|Тип шпона стороны А|Толщина шпона стороны А|Тип рисунка стороны А|Раскладка А|Раскладка Б|Сторона Б|Обратная сторона|Материал стороны Б|Материал обратной стороны|Порода на обратной стороне|Тип шпона стороны Б|Тип шпона обратной стороны|Толщина материала стороны Б|Толщина материала обратной стороны|Тип рисунка стороны Б|Тип рисунка обратной стороны|Шлифовка|Финишное покрытие|Кромка|Стороны кромления|Ширина кромки|Толщина кромки|Калибровка|Чистовой припил|Проклейка основы|Фаска на кромке)$/;
     return join(details.filter(([key])=>!shown.test(key)&&!/^Геометрический метраж кромки|^Расход кромки|^Метраж к заказу|^Расчётный метраж кромки|^Кромка · Позиция/.test(key)).filter(([key])=>!/^Финиш · Позиция/.test(key)||Number(key.match(/Позиция\s+(\d+)/)?.[1])===row?.position).map(([key,value])=>key+': '+value));
   }
   function actionButton(action,label,index,row) {
@@ -599,7 +599,7 @@
     if(productionRows().length)before.push(...pdfTable('Общая стоимость производства',['Параметр','Значение'],productionRows(),[230,309]));
     const title=type=>type==='plate'?'Плитные материалы и изделия':'Инженерная доска';
     const headers=type=>type==='plate'?panelHeaders:floorHeaders;
-    const widths=[14,58,80,54,65,72,62,65,64,85];
+    const widths=[productType==='plate'?24:14,58,80,54,65,72,62,65,64,85];
     groups.slice(1).forEach(group=>before.push(...pdfTable(title(group.type),headers(group.type),group.rows.map(item=>item.cells),widths)));
     if(edgeRows().length)before.push(...pdfTable('Спецификация кромки — стоимость уже включена в итог изделий',edgeHeaders,edgeRows()));
     before.push(...pdfTable('Данные менеджера и клиента',['Параметр','Значение'],[
@@ -615,7 +615,7 @@
     if(order.servicesCommentInput)before.push({text:'Комментарий к услугам: '+order.servicesCommentInput,style:'infoText'});
     if(conditions().length)before.push(...pdfTable('Применённые ценовые условия — уже учтены в цене',['Изделие','Составляющая','Условие','Значение','Результат'],conditions(),[28,100,160,120,131]));
     before.push(...pdfTable('Итог по изделиям',['Изделие','Стоимость с НДС'],records.map((record,index)=>[(index+1)+'. '+(record.title||record.species),money(known(record))]).concat(quoteState().scope.length?[["Производство для клиента общей суммой",money(quoteState().clientCost)]]:[]),[400,139]));
-    const product={title:title(first.type),subtitle:'Подробный расчёт',widths,header:headers(first.type).map(text=>({text,style:'tableHeader'})),rows:first.rows.map(item=>item.cells),dontBreakRows:false,beforePrice:before,afterPrice:[{text:result.partial?'* Частичная стоимость: учтены только рассчитанные составляющие. Стоимость кромки и общих затрат не начисляется повторно.':'Стоимость кромки и общих затрат уже включена в итог.',style:'infoSmall'},...(result.partial?[{text:$('partialNote').textContent,style:'infoText'}]:[])]};
+    const product={title:title(first.type),subtitle:'Подробный расчёт',widths,header:headers(first.type).map(text=>({text,style:'tableHeader'})),rows:first.rows.map(item=>item.cells.map((cell,index)=>first.type==='plate'&&index===0?{text:String(cell),noWrap:true}:cell)),dontBreakRows:false,beforePrice:before,afterPrice:[{text:result.partial?'* Частичная стоимость: учтены только рассчитанные составляющие. Стоимость кромки и общих затрат не начисляется повторно.':'Стоимость кромки и общих затрат уже включена в итог.',style:'infoSmall'},...(result.partial?[{text:$('partialNote').textContent,style:'infoText'}]:[])]};
     const doc=Common.createPdfDocument({createdAt:order.createdAt,contact:{name:order.clientNameInput,phone:order.clientPhoneInput,email:order.clientEmailInput,city:order.branchSelect},pricing:{total:result.total,vat:result.vat,partial:result.partial,finalPricePerM2:null}},product);
     // Branch belongs to the manager, not to the client. Keep the existing client layout with the correct label.
     const client=doc.content.find(node=>node.table?.body?.[0]?.[0]?.stack?.[0]?.text==='Имя');
@@ -623,7 +623,7 @@
     doc.content[0].columns[2].stack=doc.content[0].columns[2].stack.filter(node=>!node.text?.startsWith('Номер расчёта:'));
     // Individual row prices are already shown; an aggregate price must not replace them.
     const totalStack=doc.content.find(node=>node.stack?.some(part=>part.text==='Расчётная цена за м² с НДС'));
-    if(totalStack)totalStack.stack=totalStack.stack.slice(3);
+    if(totalStack){totalStack.stack=totalStack.stack.slice(3);totalStack.unbreakable=true;}
     return doc;
   }
   window.WoodstockSpecification={
@@ -669,6 +669,32 @@
   });
   try{
     const all=State.read();
+    all.forEach(record=>{
+      if(record.productType!=='plate')return;
+      const fractionalSizes=(record.sizes||[]).filter(row=>!Number.isInteger(Number(row.length))||!Number.isInteger(Number(row.width)));
+      if(fractionalSizes.length){
+        const warning='Ошибка размеров: укажите длину и ширину целыми числами миллиметров.';
+        fractionalSizes.forEach(row=>{
+          row.pricingPartial=true;
+          row.pricingComplete=false;
+          row.pendingCosts=[...new Set([...(row.pendingCosts||[]),warning])];
+        });
+        record.pricingPartial=true;
+        record.warnings=[...new Set([...(record.warnings||[]),warning])];
+      }
+      if(Number(record.baseThickness)!==21)return;
+      const sizes=(record.sizes||[]).filter(row=>row.manufacturingType==='exact'||(!row.manufacturingType&&row.cleanCuttingRequired===true));
+      if(!sizes.length)return;
+      const warning='Максимальный чистовой размер для основы 21 мм не подтверждён. Согласуйте размер с производством.';
+      sizes.forEach(row=>{
+        row.productionFitStatus='unconfirmed';
+        row.pricingPartial=true;
+        row.pricingComplete=false;
+        row.pendingCosts=[...new Set([...(row.pendingCosts||[]),warning])];
+      });
+      record.pricingPartial=true;
+      if(!(record.warnings||[]).some(note=>note.includes(warning)))record.warnings=[...(record.warnings||[]),warning];
+    });
     if(!requestedType&&all.length)productType=all[all.length-1].productType==='flooring'?'flooring':'plate';
     records=all.filter(record=>record.productType===productType);otherRecords=all.filter(record=>record.productType!==productType);
     sessionStorage.setItem('woodstockSpecificationProduct',productType);

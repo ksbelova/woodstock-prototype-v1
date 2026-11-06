@@ -19,7 +19,7 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
             </label>
 
             <div class="field">
-              <span class="field__label">Толщина основы, мм</span>
+              <span class="field__label">Толщина, мм</span>
               <select id="baseThicknessSelect" disabled>
                 <option value="">Сначала выберите основу</option>
               </select>
@@ -31,7 +31,7 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
         </section>
 
         <section class="form-block">
-          <h2>Шпон</h2>
+          <h2>Фанеровка</h2>
 
           <div class="field-grid field-grid--two">
             <label class="field" id="veneerTypeField">
@@ -42,7 +42,7 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
             </label>
 
             <div class="field autocomplete-field" id="veneerAField">
-              <label class="field__label" id="veneerAInputLabel" for="veneerAInput">Порода</label>
+              <label class="field__label" id="veneerAInputLabel" for="veneerAInput">Порода на лицевой стороне</label>
               <div class="autocomplete-control">
                 <input id="veneerAInput" type="text" autocomplete="off" placeholder="Введите наименование шпона" aria-controls="veneerASuggestions" aria-expanded="false" />
                 <button class="autocomplete-clear is-hidden" id="veneerAClear" type="button" aria-label="Очистить материал стороны А">×</button>
@@ -54,15 +54,15 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
 
           <div class="field-grid field-grid--two is-hidden" id="veneerSelectionDetailsGrid">
             <label class="field is-hidden" id="veneerThicknessField">
-              <span class="field__label">Лицевой слой</span>
+              <span class="field__label">Толщина, мм</span>
               <select id="veneerThicknessSelect"></select>
               <span class="field__error" id="veneerThicknessError"></span>
               <span class="field__note is-hidden" id="quickPaperBackHint" aria-live="polite"></span>
-              <span class="prototype-review-note is-hidden" id="quickRoughOneMmReviewNote" role="note"><strong>Внутренняя пометка · согласовать с Александром.</strong> При лицевом слое 1 мм на обратной стороне временно используется черновой шпон толщиной 1 мм по ставке 440 ₽/м² — как для 1,5 мм. Нужно подтвердить толщину и тариф чернового шпона 1 мм, а также выяснить, нужна ли отдельная производственная доплата за лицевой шпон 1 мм и как её рассчитывать. Сейчас отдельная доплата не добавляется.</span>
+              <span class="prototype-review-note is-hidden" id="quickRoughOneMmReviewNote" role="note"><strong>Внутренняя пометка · согласовать с Александром.</strong> При толщине шпона на лицевой стороне 1 мм на обратной стороне временно используется черновой шпон толщиной 1 мм по ставке 440 ₽/м² — как для 1,5 мм. Нужно подтвердить толщину и тариф чернового шпона 1 мм, а также выяснить, нужна ли отдельная производственная доплата за лицевой шпон 1 мм и как её рассчитывать. Сейчас отдельная доплата не добавляется.</span>
             </label>
 
             <label class="field is-hidden" id="veneeredSidesField">
-              <span class="field__label">Шпон</span>
+              <span class="field__label">Фанеровка</span>
               <select id="veneeredSidesSelect">
                 <option value="1">с одной стороны</option>
                 <option value="2">с двух сторон</option>
@@ -72,7 +72,7 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
 
           <div class="field-grid field-grid--two is-hidden" id="veneerSideBGrid">
             <label class="field is-hidden" id="reverseSideField">
-              <span class="field__label">Сторона Б</span>
+              <span class="field__label">Обратная сторона</span>
               <select id="reverseSideSelect">
                 <option value="rough">Черновой шпон</option>
                 <option value="paper">Бумага</option>
@@ -83,7 +83,7 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
 
           <div class="field-grid field-grid--two is-hidden" id="veneerBFields">
             <label class="field">
-              <span class="field__label">Материал стороны Б</span>
+              <span class="field__label">Порода на обратной стороне</span>
               <select id="veneerBModeSelect">
                 <option value="same">Такой же, как сторона А</option>
                 <option value="other">Другой материал</option>
@@ -92,21 +92,22 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
               <span class="field__error" id="veneerBModeHint"></span>
             </label>
             <div class="field autocomplete-field is-hidden" id="veneerBSearchField">
-              <label class="field__label" id="veneerBInputLabel" for="veneerBInput">Другой шпон — сторона Б</label>
+              <label class="field__label" id="veneerBInputLabel" for="veneerBInput">Другой шпон — обратная сторона</label>
               <div class="autocomplete-control">
                 <input id="veneerBInput" type="text" autocomplete="off" placeholder="Введите наименование материала" aria-controls="veneerBSuggestions" aria-expanded="false" />
-                <button class="autocomplete-clear is-hidden" id="veneerBClear" type="button" aria-label="Очистить шпон стороны Б">×</button>
+                <button class="autocomplete-clear is-hidden" id="veneerBClear" type="button" aria-label="Очистить шпон обратной стороны">×</button>
                 <div class="autocomplete-menu is-hidden" id="veneerBSuggestions" role="listbox"></div>
               </div>
               <span class="field__error" id="veneerBError"></span>
             </div>
             <label class="field is-hidden" id="veneerBCutField">
-              <span class="field__label">Тип рисунка стороны Б</span>
-              <select id="veneerBCutSelect"><option value="">Выберите тип рисунка</option></select>
+              <span class="field__label">Тип рисунка обратной стороны</span>
+              <select id="veneerBCutSelect" aria-describedby="veneerBCutHint"><option value="">Выберите тип рисунка</option></select>
+              <span class="field__note" id="veneerBCutHint"><strong>Радиальный.</strong> Рисунок из ровных полос, спокойный и однородный.<br><strong>Тангенциальный.</strong> Рисунок из дуг и волн, яркий и живой. Листы не похожи друг на друга.</span>
               <span class="field__error" id="veneerBCutError"></span>
             </label>
             <label class="field is-hidden" id="veneerBRoughThicknessField">
-              <span class="field__label">Толщина чернового шпона стороны Б</span>
+              <span class="field__label">Толщина чернового шпона обратной стороны</span>
               <select id="veneerBRoughThicknessSelect"><option value="">Выберите толщину</option></select>
             </label>
           </div>
@@ -114,18 +115,19 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
           <div class="field-grid field-grid--two is-hidden" id="veneerLayoutGrid">
             <label class="field is-hidden" id="veneerCutField">
               <span class="field__label">Тип рисунка</span>
-              <select id="veneerCutSelect"><option value="">Выберите тип рисунка</option></select>
+              <select id="veneerCutSelect" aria-describedby="veneerCutHint"><option value="">Выберите тип рисунка</option></select>
+              <span class="field__note" id="veneerCutHint"><strong>Радиальный.</strong> Рисунок из ровных полос, спокойный и однородный.<br><strong>Тангенциальный.</strong> Рисунок из дуг и волн, яркий и живой. Листы не похожи друг на друга.</span>
               <span class="field__error" id="veneerCutError"></span>
             </label>
             <label class="field is-hidden" id="layoutField">
-              <span class="field__label">Раскладка, сторона А</span>
+              <span class="field__label">Раскладка лицевой стороны</span>
               <select id="layoutSelect"><option value="">Выберите раскладку</option></select>
               <span class="field__error" id="layoutError"></span>
             </label>
           </div>
 
           <label class="field is-hidden" id="layoutBField">
-            <span class="field__label">Раскладка, сторона Б</span>
+            <span class="field__label">Раскладка обратной стороны</span>
             <select id="layoutBSelect"><option value="">Как на стороне А</option></select>
           </label>
 
@@ -186,7 +188,7 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
 
             <div class="field-grid field-grid--two">
               <div class="field autocomplete-field">
-                <label class="field__label" for="edgeMaterialInput">Материал кромки</label>
+                <label class="field__label" for="edgeMaterialInput">Порода</label>
                 <div class="autocomplete-control">
                   <input id="edgeMaterialInput" type="text" autocomplete="off" placeholder="Сначала выберите тип кромки" aria-controls="edgeMaterialSuggestions" aria-expanded="false" />
                   <button class="autocomplete-clear is-hidden" id="edgeMaterialClear" type="button" aria-label="Очистить наименование кромки">×</button>
@@ -197,7 +199,7 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
               </div>
 
               <label class="field is-hidden" id="edgeThicknessField">
-                <span class="field__label">Толщина кромки, мм</span>
+                <span class="field__label">Толщина, мм</span>
                 <select id="edgeThicknessSelect">
                   <option value="">Выберите толщину кромки</option>
                 </select>
@@ -206,13 +208,13 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
 
             <div class="field-grid field-grid--two">
               <label class="field" id="edgeWidthField">
-                <span class="field__label">Ширина кромки, мм</span>
+                <span class="field__label">Ширина, мм</span>
                 <select id="edgeWidthSelect" disabled>
                   <option value="">Выберите позицию кромки</option>
                 </select>
               </label>
               <label class="field is-hidden" id="edgeOrderWidthField">
-                <span class="field__label">Ширина кромки, мм</span>
+                <span class="field__label">Ширина, мм</span>
                 <input id="edgeOrderWidthInput" type="number" min="1" step="1" inputmode="decimal" />
                 <span class="field__note">Предложена ширина по толщине детали; можно изменить. Цена заказной кромки требует согласования.</span>
               </label>
@@ -259,7 +261,7 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
 
             <div class="field-grid field-grid--two">
               <div class="field autocomplete-field">
-                <label class="field__label" for="separateEdgeMaterialInput">Материал кромки</label>
+                <label class="field__label" for="separateEdgeMaterialInput">Порода</label>
                 <div class="autocomplete-control">
                   <input id="separateEdgeMaterialInput" type="text" autocomplete="off" placeholder="Сначала выберите тип кромки" aria-controls="separateEdgeMaterialSuggestions" aria-expanded="false" />
                   <button class="autocomplete-clear is-hidden" id="separateEdgeMaterialClear" type="button" aria-label="Очистить наименование кромки">×</button>
@@ -270,7 +272,7 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
               </div>
 
               <label class="field is-hidden" id="separateEdgeThicknessField">
-                <span class="field__label">Толщина кромки, мм</span>
+                <span class="field__label">Толщина, мм</span>
                 <select id="separateEdgeThicknessSelect">
                   <option value="">Выберите толщину кромки</option>
                 </select>
@@ -279,13 +281,13 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
 
             <div class="field-grid field-grid--two">
               <label class="field" id="separateEdgeWidthField" data-quick-hidden>
-                <span class="field__label">Ширина кромки, мм</span>
+                <span class="field__label">Ширина, мм</span>
                 <select id="separateEdgeWidthSelect" disabled>
                   <option value="">Выберите позицию кромки</option>
                 </select>
               </label>
               <label class="field is-hidden" id="separateEdgeOrderWidthField" data-quick-hidden>
-                <span class="field__label">Ширина кромки, мм</span>
+                <span class="field__label">Ширина, мм</span>
                 <input id="separateEdgeOrderWidthInput" type="number" min="1" step="1" inputmode="decimal" />
                 <span class="field__note">Предложена ширина по толщине детали; можно изменить. Цена заказной кромки требует согласования.</span>
               </label>
@@ -325,7 +327,7 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
           </div>
           <div class="dynamic-adjustments tech-operations-list">
             <div class="dynamic-adjustment-row">
-              <div class="dynamic-adjustment-row__label"><strong>Шпон</strong></div>
+              <div class="dynamic-adjustment-row__label"><strong>Фанеровка</strong></div>
               <div class="dynamic-adjustment-row__right"><strong id="techVeneeringSummary">—</strong></div>
             </div>
             <div class="dynamic-adjustment-row">
@@ -599,4 +601,4 @@ body[data-panel-scenario="standard"] [data-size-extra] {display:none!important}
         Расчёт является предварительным и не является публичной офертой.
       </p>
     </div>
-  </dialog><script src="../../vendor/pdfmake/pdfmake.min.js"></script><script src="../../vendor/pdfmake/vfs_fonts.js"></script><script src="../../js/core/panels-core.js"></script><script src="../../js/core/quick-common.js"></script><script src="../../js/core/specification-state.js"></script><script src="../../js/quick-panels.js?v=20261103-ordered-edge"></script><script src="../../js/detailed-panels.js?v=20261103-ordered-edge"></script></body></html>
+  </dialog><script src="../../vendor/pdfmake/pdfmake.min.js"></script><script src="../../vendor/pdfmake/vfs_fonts.js"></script><script src="../../js/core/panels-core.js"></script><script src="../../js/core/quick-common.js"></script><script src="../../js/core/specification-state.js"></script><script src="../../js/quick-panels.js?v=20261106-edge-glue-rules"></script><script src="../../js/detailed-panels.js?v=20261106-panel-side-terms-complete"></script></body></html>
